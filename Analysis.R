@@ -109,45 +109,87 @@ if (!requireNamespace("ggh4x", quietly = TRUE)) {
 }
 library(ggh4x)
 
+# NEW 2026-10-29: Wes Anderson palettes (Royal1, Royal2) for every figure.
+# Installed automatically if missing, same as ggh4x above.
+if (!requireNamespace("wesanderson", quietly = TRUE)) {
+  message("Installing 'wesanderson' (one-time - used for the figure palettes)...")
+  install.packages("wesanderson")
+}
+library(wesanderson)
+
 # -----------------------------------------------------------------------
-# COLOR PALETTE (NEW 2026-09-30) - one small set of colorblind-safe hex
-# values, reused everywhere by MEANING rather than picked per-plot. This
-# replaces what had become ~10 unrelated named colors (steelblue,
-# chocolate, seagreen, darkslategray, midnightblue, darkorange3, ...)
-# scattered across the script with no consistent logic, which made
-# domain (viral vs bacterial) hard to track visually from one figure to
-# the next and was never checked for colorblind-safety. Values are a
-# validated colorblind-safe categorical palette (fixed hue order - the
-# order itself is the CVD-safety mechanism, so it's never reshuffled
-# per-plot; each adjacent pair stays distinguishable under simulated
-# protanopia/deuteranopia). The two domain colors also double as the
-# base hue for each domain's sequential heatmap ramp (viral -> blue
-# "viridis", bacterial -> orange "magma", both already perceptually
-# uniform, colorblind-safe continuous scales), so a reader associates
-# the same hue family with the same domain everywhere in the thesis,
-# not just in the line charts.
+# COLOR PALETTE (rewritten 2026-10-29) - Wes Anderson "Royal1" and
+# "Royal2" (wesanderson package), reused everywhere by MEANING rather than
+# picked per-plot, so a reader associates the same colour with the same
+# domain/participant/event from one figure to the next.
+#   Royal1: grey-blue, red, cream, orange
+#   Royal2: olive, peach, pink, cream-yellow, green
+# The pale tones (cream, peach, pink, cream-yellow) are used for FILLS
+# only (bars, boxplots, points, heatmap midpoints) and every filled shape
+# gets a black outline, so pale fills stay readable on a white background.
+# Lines use the mid-tone colours. Palette choice is aesthetic, not
+# colourblind-validated: viral (grey-blue) and bacterial (orange) differ
+# strongly in lightness, which is what carries the distinction under
+# simulated colour-vision deficiency.
 # -----------------------------------------------------------------------
-COL_VIRAL     <- "#2a78d6"  # blue    - every viral-domain series/marker
-COL_BACTERIAL <- "#eb6834"  # orange  - every bacterial-domain series/marker
-COL_RICHNESS  <- "#1baf7a"  # aqua    - viral richness (kept distinct from viral diversity/abundance on shared figures)
-COL_AMG       <- "#eda100"  # yellow  - AMG-carrying vOTU trend
-COL_ABUNDANCE <- "#e87ba4"  # magenta - viral total-abundance trend
-COL_MARKER    <- "#e34948"  # red     - antibiotic-window marker line (an event, not a data series)
-COL_DIV_LOW   <- "#e34948"  # red     - diverging scale, negative pole
-COL_DIV_MID   <- "#f0efec"  # neutral gray - diverging scale midpoint (0 correlation)
-COL_DIV_HIGH  <- "#2a78d6"  # blue    - diverging scale, positive pole
+ROYAL1 <- as.character(wes_palette("Royal1"))
+ROYAL2 <- as.character(wes_palette("Royal2"))
+stopifnot(length(ROYAL1) == 4, length(ROYAL2) == 5)
+
+# Blend a colour toward black or white (used only to make the within-
+# domain dark/light steps below out of the palette's own colours).
+shade_toward <- function(col, target = "black", amount = 0.35) {
+  a <- grDevices::col2rgb(col)[, 1]
+  b <- grDevices::col2rgb(target)[, 1]
+  mix <- a + (b - a) * amount
+  grDevices::rgb(mix[1], mix[2], mix[3], maxColorValue = 255)
+}
+
+COL_VIRAL     <- ROYAL1[1]  # grey-blue - every viral-domain series/marker
+COL_BACTERIAL <- ROYAL1[4]  # orange    - every bacterial-domain series/marker
+COL_RICHNESS  <- ROYAL2[5]  # green     - viral richness (kept distinct from viral diversity/abundance on shared figures)
+COL_AMG       <- ROYAL2[1]  # olive     - AMG-carrying vOTU trend
+COL_ABUNDANCE <- shade_toward(ROYAL2[3], "black", 0.25)  # darkened pink - viral total-abundance trend (pure pink is too pale for a line)
+COL_MARKER    <- ROYAL1[2]  # red       - antibiotic-window marker line (an event, not a data series)
+COL_DIV_LOW   <- ROYAL1[2]  # red       - diverging scale, negative pole
+COL_DIV_MID   <- ROYAL1[3]  # cream     - diverging scale midpoint (0 correlation)
+COL_DIV_HIGH  <- ROYAL1[1]  # grey-blue - diverging scale, positive pole
 # Within-domain ORDINAL shading for "most variable" vs "least variable/
 # stable" trend panels - same hue family per domain, dark vs light step,
 # since "most/least variable" is a position on one spectrum (an ordinal
 # distinction), not a separate categorical identity.
-COL_VIRAL_DARK      <- "#184f95"  # most variable vOTUs
-COL_VIRAL_LIGHT     <- "#5598e7"  # least variable (most stable) vOTUs
-COL_BACTERIAL_DARK  <- "#b34d1f"  # most variable genera/species
-COL_BACTERIAL_LIGHT <- "#f0a878"  # least variable (most stable) genera/species
-# Fixed per-participant identity colors - used anywhere D3/G2/L1 are
+COL_VIRAL_DARK      <- shade_toward(COL_VIRAL, "black", 0.35)  # most variable vOTUs
+COL_VIRAL_LIGHT     <- shade_toward(COL_VIRAL, "white", 0.40)  # least variable (most stable) vOTUs
+COL_BACTERIAL_DARK  <- shade_toward(COL_BACTERIAL, "black", 0.35)  # most variable genera/species
+COL_BACTERIAL_LIGHT <- shade_toward(COL_BACTERIAL, "white", 0.40)  # least variable (most stable) genera/species
+# Fixed per-participant identity colours - used anywhere D3/G2/L1 are
 # distinguished by fill/colour within the SAME panel (rather than split
-# across facets, which needs no color coding at all).
-PARTICIPANT_COLORS <- c(D3 = "#1baf7a", G2 = "#e87ba4", L1 = "#4a3aa7")
+# across facets, which needs no colour coding at all).
+PARTICIPANT_COLORS <- c(D3 = ROYAL2[5], G2 = ROYAL2[3], L1 = ROYAL2[1])
+# Heatmap ramps (changed 2026-11-03): white (absent) -> pale yellow -> orange -> red for
+# bacteria, white -> pale grey-blue -> blue-grey -> dark slate for viruses. Every step is a
+# clearly different colour, with no brown mid-tones.
+HEAT_BACTERIAL <- c("#FFFFFF", ROYAL2[4], ROYAL1[4], ROYAL1[2], shade_toward(ROYAL1[2], "black", 0.2))
+HEAT_VIRAL     <- c("#FFFFFF", shade_toward(ROYAL1[1], "white", 0.55), ROYAL1[1], shade_toward(ROYAL1[1], "black", 0.35), shade_toward(ROYAL1[1], "black", 0.65))
+COL_NEUTRAL_FILL   <- ROYAL1[3]  # cream - "between participants" box, other non-identity fills
+
+# Categorical fill for many-level stacked bars (genus / function / lifestyle
+# composition). Royal1 + Royal2 only have 9 colours, so levels beyond that are
+# interpolated between them; the black bar outlines keep neighbouring
+# categories separable.
+WES_CAT_ORDER <- c(ROYAL1[2], ROYAL1[1], ROYAL1[4], ROYAL2[5], ROYAL2[1],
+                   ROYAL2[3], ROYAL1[3], ROYAL2[2], ROYAL2[4])
+wes_cat <- function(n) {
+  if (n <= length(WES_CAT_ORDER)) WES_CAT_ORDER[seq_len(n)]
+  else grDevices::colorRampPalette(WES_CAT_ORDER)(n)
+}
+scale_fill_wes_d <- function(...) {
+  if (utils::packageVersion("ggplot2") >= "3.5.0") {
+    discrete_scale("fill", palette = wes_cat, ...)
+  } else {
+    discrete_scale("fill", "wes", palette = wes_cat, ...)
+  }
+}
 
 
 # #############################################################################
@@ -234,7 +276,7 @@ check_join <- function(df, col, label) {
   n_missing <- sum(is.na(df[[col]]))
   pct <- round(100 * n_missing / n_total, 1)
   message(sprintf("%-25s: %5d / %5d rows unmatched (%s%%)",
-                  label, n_missing, n_total, pct))
+                   label, n_missing, n_total, pct))
 }
 message("=== Join diagnostics (viral_long) ===")
 check_join(viral_long, "tier",  "confidence_tiers join")
@@ -272,7 +314,7 @@ votu_display_lookup <- viral_long |>
   mutate(votu_display = sprintf("vOTU_%03d", row_number()))
 
 message(sprintf("=== vOTU display-ID lookup built: %d vOTUs relabelled vOTU_001-vOTU_%03d for every figure (see votu_display_lookup for the real contig IDs behind each one) ===",
-                nrow(votu_display_lookup), nrow(votu_display_lookup)))
+                 nrow(votu_display_lookup), nrow(votu_display_lookup)))
 
 viral_long <- viral_long |>
   left_join(votu_display_lookup, by = c("contig", "votu_id"))
@@ -333,7 +375,7 @@ bacterial_long <- bacterial_long |>
   )
 
 message(sprintf("Bacterial long table: %d rows from %d samples",
-                nrow(bacterial_long), length(bracken_files)))
+                 nrow(bacterial_long), length(bracken_files)))
 
 ## 1.2b. Exclude non-bacterial (host/human) contamination (found 2026-09-29,
 ## flagged by the user noticing "Homo" among the least-variable bacterial
@@ -451,7 +493,7 @@ gmpr_size_factors <- function(count_matrix, min_shared = 3) {
   n_pairs_used <- integer(n)
   names(gmpr) <- samples
   names(n_pairs_used) <- samples
-  
+
   for (j in seq_len(n)) {
     pairwise_ratios <- c()
     for (k in seq_len(n)) {
@@ -473,11 +515,11 @@ gmpr_size_factors <- function(count_matrix, min_shared = 3) {
       gmpr[j] <- exp(mean(log(pairwise_ratios)))
     }
   }
-  
+
   # Normalize so the geometric mean of all factors is 1 (interpretability)
   valid <- !is.na(gmpr) & gmpr > 0
   gmpr[valid] <- gmpr[valid] / exp(mean(log(gmpr[valid])))
-  
+
   attr(gmpr, "n_pairs_used") <- n_pairs_used
   gmpr
 }
@@ -593,7 +635,7 @@ antibiotic_marker <- function(participant_filter = "L1", x_position = 4.5) {
     geom_vline(
       data = data.frame(participant = participant_filter, xintercept = x_position),
       aes(xintercept = xintercept),
-      linetype = "dashed", colour = "firebrick", linewidth = 0.6
+      linetype = "dashed", colour = COL_MARKER, linewidth = 0.6
     )
   )
 }
@@ -608,7 +650,7 @@ antibiotic_marker_date <- function(participant_filter = "L1") {
     geom_vline(
       data = data.frame(participant = participant_filter, xintercept = l1_antibiotic_marker_date),
       aes(xintercept = xintercept),
-      linetype = "dashed", colour = "firebrick", linewidth = 0.6
+      linetype = "dashed", colour = COL_MARKER, linewidth = 0.6
     )
   )
 }
@@ -651,15 +693,31 @@ integer_breaks <- function(x) {
 # ggh4x::facetted_pos_scales() gives each facet panel a genuinely
 # independent x scale, so every panel shows exactly (and only) that
 # participant's own real sample dates, however irregular the spacing.
+# NEW 2026-10-29: fixes crammed/overlapping date labels. Every real sample
+# date still gets a tick (so the axis shows exactly when samples were
+# taken), but only every second tick is labelled, which halves the label
+# density in the 3-panel and 8-panel faceted figures.
+thin_date_labels <- function(x) {
+  lab <- format(x, "%d %b %y")
+  lab[seq_along(lab) %% 2 == 0] <- ""
+  lab
+}
+
 participant_date_scales <- function() {
   by_participant <- split(sample_dates$collection_date,
-                          sub("\\..*", "", sample_dates$sample_id))
+                           sub("\\..*", "", sample_dates$sample_id))
   ggh4x::facetted_pos_scales(
     x = lapply(by_participant, function(d) {
-      scale_x_date(breaks = sort(unique(d)), date_labels = "%d %b %y")
+      scale_x_date(breaks = sort(unique(d)), labels = thin_date_labels)
     })
   )
 }
+
+# p-value formatting for on-figure annotations (added 2026-11-09)
+fmt_p <- function(p) vapply(p, function(x) {
+  if (is.na(x)) "NA" else if (x < 0.001) formatC(x, format = "e", digits = 1) else formatC(x, format = "f", digits = 3)
+}, character(1))
+p_stars <- function(p) dplyr::case_when(is.na(p) ~ "", p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns")
 
 # -----------------------------------------------------------------------
 # Helper: move every figure's title below the plot as a caption, per
@@ -709,7 +767,12 @@ heatmap_axis_theme <- function(n_labels) {
 theme_thesis <- function(base_size = 11) {
   theme_minimal(base_size = base_size) +
     theme(
-      strip.text       = element_text(face = "bold", size = rel(0.95)),
+      # Facet labels: plain bold text sitting directly above each panel - no filled
+      # block or outline (changed 2026-11-03 so the label does not compete with the data).
+      strip.text       = element_text(face = "bold", size = rel(0.85), hjust = 0,
+                                      margin = margin(t = 1, b = 3, l = 1)),
+      strip.background = element_blank(),
+      panel.border     = element_rect(fill = NA, colour = "black", linewidth = 0.5),
       plot.title       = element_text(face = "bold"),
       panel.grid.minor = element_blank(),
       legend.position  = "bottom"
@@ -733,12 +796,12 @@ figure_captions <- list()
 # co-occurrence heatmaps do this, since their legible size depends on
 # how many vOTU labels are on each axis (see Parts 5 and 9).
 # -----------------------------------------------------------------------
-style_figure <- function(p, width = 8, height = 6, dpi = 300) {
+style_figure <- function(p, width = 10, height = 6, dpi = 300) {
   ttl <- p$labels$title
   sub <- p$labels$subtitle
-  
+
   figure_captions[[length(figure_captions) + 1]] <<- list(title = ttl, subtitle = sub)
-  
+
   fig_n <- length(figure_captions)
   slug <- if (is.null(ttl)) {
     "untitled"
@@ -748,21 +811,93 @@ style_figure <- function(p, width = 8, height = 6, dpi = 300) {
       str_replace_all("[^a-z0-9]+", "_") |>
       str_replace_all("^_+|_+$", "")
   }
-  
+
   styled <- p +
     labs(title = NULL, subtitle = NULL, caption = ttl) +
     theme(
       plot.caption          = element_text(hjust = 0, size = 10, margin = margin(t = 8)),
       plot.caption.position = "plot"
     )
-  
-  ggsave(
-    file.path(FIGURES_DIR, sprintf("fig%02d_%s.png", fig_n, slug)),
-    plot = styled, width = width, height = height, dpi = dpi, bg = "white", limitsize = FALSE
-  )
-  
-  styled
+
+  # Figures are NOT saved or shown here any more (changed 2026-11-03). They are
+  # registered in draw order and exported/printed together at the end of the
+  # script by export_figures_in_order(), grouped by topic, so the PNG numbering
+  # and the Plots-pane order follow the thesis structure rather than code order.
+  figure_registry[[fig_n]] <<- list(title = ttl, subtitle = sub, plot = styled,
+                                    width = width, height = height, dpi = dpi, slug = slug,
+                                    draw_no = fig_n)
+
+  # Return a small placeholder (not the plot) so the print(style_figure(...)) calls
+  # throughout the script are no-ops; the real plot is held in figure_registry.
+  structure(list(title = ttl), class = "deferred_fig")
 }
+
+figure_registry <- list()
+
+# print() on a registered figure does nothing; the real print happens in order later.
+print.deferred_fig <- function(x, ...) invisible(x)
+
+# Topic groups, in the order they are exported. First matching rule wins.
+FIGURE_GROUPS <- tibble::tribble(
+  ~group,                                         ~pattern,
+  "01 Alpha diversity & sequencing depth",        "^Viral \\(vOTU\\) (Shannon|richness)|^Total normalized viral abundance|^Bacterial Shannon|^Viral vs bacterial Shannon|^Richness vs sequencing depth|^Sequencing depth over time|^Bacterial richness over time|^Total bacterial reads",
+  "02 Detection frequency, persistence & turnover","^Detection frequency|^vOTU assembly|^Turnover between",
+  "03 Beta diversity (Aitchison) & ordination",   "^Community distance from baseline|ordination|^Within-person",
+  "04 Bacterial composition",                     "^(Overall )?bacterial (genus|species) composition",
+  "05 Bacterial trajectories (genera & species)", "bacterial (genera|species) over time",
+  "06 Bacterial heatmaps",                        "^Bacterial (genus|species) abundance heatmap",
+  "07 Viral taxonomy, host & lifestyle",          "^vOTU classification depth|^Predicted host genera|^Temperate share",
+  "08 Viral function & AMGs",                     "^Overall functional|^Functional category|^Prevalence of each functional|^Auxiliary metabolic",
+  "09 vOTU trajectories",                         "vOTUs over time",
+  "10 vOTU heatmaps",                             "^Viral vOTU abundance heatmap",
+  "11 Co-occurrence networks",                    "co-occurrence",
+  "12 Phage-host trajectories",                   "^Phage:predicted-host",
+  "13 L1 antibiotic response & pre/post windows",  "^L1: bacterial|^Pre vs post window"
+)
+
+# Saves every registered figure as fig{NN}_{slug}.png (NN = position in the grouped
+# order), prints them in that order, writes figure_index.csv, and reorders
+# figure_captions so the legend list at the end of the script follows the same order.
+clear_old_figures <- TRUE   # delete this script's earlier fig##_*.png files first, so stale numbering cannot be mixed in
+
+export_figures_in_order <- function() {
+  reg <- figure_registry
+  grp <- vapply(reg, function(f) {
+    hit <- which(vapply(FIGURE_GROUPS$pattern, function(pt) grepl(pt, f$title %||% "", ignore.case = TRUE), logical(1)))
+    if (length(hit)) FIGURE_GROUPS$group[hit[1]] else "99 Ungrouped (check title rules)"
+  }, character(1))
+  ord <- order(grp, vapply(reg, function(f) f$draw_no, numeric(1)))
+
+  if (clear_old_figures) {
+    old <- list.files(FIGURES_DIR, pattern = "^fig[0-9]+_.*\\.png$", full.names = TRUE)
+    if (length(old)) { file.remove(old); message(sprintf("Removed %d earlier fig##_*.png files from %s", length(old), FIGURES_DIR)) }
+  }
+
+  idx <- vector("list", length(ord))
+  for (k in seq_along(ord)) {
+    f <- reg[[ord[k]]]
+    fn <- sprintf("fig%02d_%s.png", k, f$slug)
+    ggsave(file.path(FIGURES_DIR, fn), plot = f$plot, width = f$width, height = f$height,
+           dpi = f$dpi, bg = "white", limitsize = FALSE)
+    print(f$plot)
+    idx[[k]] <- data.frame(fig_no = k, group = grp[ord[k]], draw_order_no = f$draw_no,
+                           title = f$title %||% "", file = fn, stringsAsFactors = FALSE)
+  }
+  index_df <- do.call(rbind, idx)
+  utils::write.csv(index_df, file.path(BASE, "results", "figure_index.csv"), row.names = FALSE)
+
+  figure_captions <<- lapply(ord, function(i) list(title = reg[[i]]$title, subtitle = reg[[i]]$subtitle))
+  figure_index <<- index_df
+  message(sprintf("=== Exported %d figures in grouped order; index saved to results/figure_index.csv ===", nrow(index_df)))
+  print(table(index_df$group))
+  if (any(grepl("^99", index_df$group))) {
+    message("Figures not matched to a group (add a rule to FIGURE_GROUPS):")
+    print(index_df[grepl("^99", index_df$group), c("fig_no", "title")])
+  }
+  invisible(index_df)
+}
+
+if (!exists("%||%", mode = "function")) `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # -----------------------------------------------------------------------
 # 2.1. VIRAL DIVERSITY OVER TIME (richness + Shannon)
@@ -785,7 +920,7 @@ viral_diversity <- viral_long |>
 
 p_viral_shannon <- ggplot(viral_diversity, aes(x = collection_date, y = shannon)) +
   geom_line(colour = COL_VIRAL) +
-  geom_point(size = 2, colour = COL_VIRAL) +
+  geom_point(shape = 21, size = 2, fill = COL_VIRAL, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   participant_date_scales() +
@@ -796,7 +931,7 @@ p_viral_shannon <- ggplot(viral_diversity, aes(x = collection_date, y = shannon)
 
 p_viral_richness <- ggplot(viral_diversity, aes(x = collection_date, y = richness)) +
   geom_line(colour = COL_RICHNESS) +
-  geom_point(size = 2, colour = COL_RICHNESS) +
+  geom_point(shape = 21, size = 2, fill = COL_RICHNESS, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   participant_date_scales() +
@@ -822,7 +957,7 @@ viral_total_abundance <- viral_long |>
 
 p_viral_abundance <- ggplot(viral_total_abundance, aes(x = collection_date, y = normalized_abundance)) +
   geom_line(colour = COL_ABUNDANCE) +
-  geom_point(size = 2, colour = COL_ABUNDANCE) +
+  geom_point(shape = 21, size = 2, fill = COL_ABUNDANCE, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   participant_date_scales() +
@@ -848,7 +983,7 @@ print(style_figure(p_viral_abundance))
 p_cluster_concordance <- confidence_tiers |>
   count(n_samples) |>
   ggplot(aes(x = factor(n_samples), y = n)) +
-  geom_col(fill = COL_VIRAL) +
+  geom_col(fill = COL_VIRAL, colour = "black", linewidth = 0.3) +
   geom_text(aes(label = n), vjust = -0.3) +
   labs(title = "vOTU assembly/clustering concordance across samples (CD-HIT-based)",
        subtitle = "NOT a persistence measure - see Section 2.3B for read-mapping-based persistence",
@@ -890,30 +1025,6 @@ print(concordant_votu_table)
 # expected with discrete detection-frequency ratios, doesn't affect the
 # conclusion).
 
-# ECDF - best for comparing overall distribution shape/shift
-p_detection_freq_ecdf <- ggplot(detection_freq_combined, aes(x = detection_freq, colour = domain)) +
-  stat_ecdf(geom = "step", linewidth = 0.8) +
-  facet_wrap(~ participant) +
-  scale_colour_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
-  labs(title = "Detection frequency (read-mapping-based): viral vs bacterial",
-       subtitle = "Proportion of that participant's own samples each vOTU/taxon was detected in",
-       x = "Detection frequency", y = "Cumulative proportion", colour = NULL) +
-  theme_thesis()
-
-print(style_figure(p_detection_freq_ecdf))
-
-# Density histogram - shows the bimodal "core + transient" bacterial
-# shape (and its absence in viral) more intuitively than the ECDF
-p_detection_freq_hist <- ggplot(detection_freq_combined, aes(x = detection_freq, fill = domain)) +
-  geom_histogram(aes(y = after_stat(density)), position = "identity", alpha = 0.55, bins = 10) +
-  facet_wrap(~ participant) +
-  scale_fill_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
-  labs(title = "Detection frequency distribution (density-normalized): viral vs bacterial",
-       x = "Detection frequency", y = "Density", fill = NULL) +
-  theme_thesis()
-
-print(style_figure(p_detection_freq_hist))
-
 # Per-participant Kolmogorov-Smirnov test - confirms viral vs bacterial
 # detection-frequency distributions differ significantly WITHIN each
 # individual, not just when pooled
@@ -927,6 +1038,38 @@ ks_by_participant <- detection_freq_combined |>
     .groups = "drop"
   )
 print(ks_by_participant)
+
+ks_labels <- ks_by_participant |> mutate(label = paste0("KS p = ", fmt_p(ks_p)))
+
+# ECDF - best for comparing overall distribution shape/shift
+p_detection_freq_ecdf <- ggplot(detection_freq_combined, aes(x = detection_freq, colour = domain)) +
+  stat_ecdf(geom = "step", linewidth = 0.8) +
+  facet_wrap(~ participant) +
+  geom_text(data = ks_labels, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
+            hjust = -0.08, vjust = 1.6, size = 3) +
+  scale_colour_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
+  labs(title = "Detection frequency (read-mapping-based): viral vs bacterial",
+       subtitle = "Proportion of that participant's own samples each vOTU/taxon was detected in",
+       x = "Detection frequency", y = "Cumulative proportion", colour = NULL) +
+  theme_thesis()
+
+print(style_figure(p_detection_freq_ecdf))
+
+# Density histogram - shows the bimodal "core + transient" bacterial
+# shape (and its absence in viral) more intuitively than the ECDF
+p_detection_freq_hist <- ggplot(detection_freq_combined, aes(x = detection_freq, fill = domain)) +
+  geom_histogram(aes(y = after_stat(density)), position = "identity", alpha = 0.55, bins = 10,
+                 colour = "black", linewidth = 0.25) +
+  facet_wrap(~ participant) +
+  geom_text(data = ks_labels, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
+            hjust = -0.08, vjust = 1.6, size = 3) +
+  scale_fill_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
+  labs(title = "Detection frequency distribution (density-normalized): viral vs bacterial",
+       x = "Detection frequency", y = "Density", fill = NULL) +
+  theme_thesis()
+
+print(style_figure(p_detection_freq_hist))
+
 
 # Core / intermediate / transient split - the headline effect-size numbers
 detection_freq_combined |>
@@ -959,7 +1102,7 @@ bacterial_diversity <- bacterial_long |>
 
 p_bacterial_shannon <- ggplot(bacterial_diversity, aes(x = collection_date, y = shannon)) +
   geom_line(colour = COL_BACTERIAL) +
-  geom_point(size = 2, colour = COL_BACTERIAL) +
+  geom_point(shape = 21, size = 2, fill = COL_BACTERIAL, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   participant_date_scales() +
@@ -969,6 +1112,41 @@ p_bacterial_shannon <- ggplot(bacterial_diversity, aes(x = collection_date, y = 
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 print(style_figure(p_bacterial_shannon))
+
+# Bacterial richness and total reads over time (added 2026-11-09; counterparts of the
+# viral richness and total-abundance figures in 2.1-2.2)
+p_bacterial_richness <- ggplot(bacterial_diversity, aes(x = collection_date, y = richness)) +
+  geom_line(colour = COL_BACTERIAL) +
+  geom_point(shape = 21, size = 2, fill = COL_BACTERIAL, colour = "black", stroke = 0.4) +
+  antibiotic_marker_date() +
+  facet_wrap(~ participant, scales = "free_x") +
+  participant_date_scales() +
+  labs(title = "Bacterial richness over time",
+       x = "Collection date", y = "Number of species detected") +
+  theme_thesis() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(style_figure(p_bacterial_richness))
+
+bacterial_total_reads_time <- bacterial_long |>
+  group_by(sample_id, participant, timepoint) |>
+  summarise(total_reads = sum(new_est_reads), .groups = "drop") |>
+  left_join(sample_dates, by = "sample_id")
+
+p_bacterial_total_reads <- ggplot(bacterial_total_reads_time, aes(x = collection_date, y = total_reads)) +
+  geom_line(colour = COL_BACTERIAL) +
+  geom_point(shape = 21, size = 2, fill = COL_BACTERIAL, colour = "black", stroke = 0.4) +
+  antibiotic_marker_date() +
+  facet_wrap(~ participant, scales = "free_x") +
+  participant_date_scales() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Total bacterial reads (Bracken-assigned) over time",
+       subtitle = "Bracken-assigned read count per sample. Not an absolute abundance: it reflects sequencing depth as well as bacterial load, and unlike the viral series it is not size-factor normalised.",
+       x = "Collection date", y = "Bracken-assigned reads") +
+  theme_thesis() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(style_figure(p_bacterial_total_reads))
 
 # -----------------------------------------------------------------------
 # 2.5. VIRAL vs BACTERIAL DIVERSITY - COMBINED VIEW
@@ -984,13 +1162,14 @@ combined_diversity <- bind_rows(
 
 p_combined <- ggplot(combined_diversity, aes(x = collection_date, y = shannon, colour = domain)) +
   geom_line() +
-  geom_point(size = 2) +
+  geom_point(aes(fill = domain), shape = 21, size = 2.4, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_colour_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
+  scale_fill_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
   participant_date_scales() +
   labs(title = "Viral vs bacterial Shannon diversity over time",
-       x = "Collection date", y = "Shannon diversity", colour = NULL) +
+       x = "Collection date", y = "Shannon diversity", colour = NULL, fill = NULL) +
   theme_thesis() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
@@ -1068,7 +1247,7 @@ message("NOTE: n_timepoints per test is only 8-10 (D3), 8 (G2), or 9 (L1) - Kend
 # lineage, so both get normalized to "root" here.)
 
 rank_order <- c("unclassified", "root", "realm", "kingdom", "phylum",
-                "class", "order", "family", "subfamily", "genus", "species")
+                 "class", "order", "family", "subfamily", "genus", "species")
 
 extract_deepest_rank <- function(lineage) {
   if (is.na(lineage) || lineage == "-") return("unclassified")
@@ -1111,7 +1290,7 @@ taxonomy |>
 p_viral_classification_depth <- taxonomy |>
   count(deepest_rank) |>
   ggplot(aes(x = deepest_rank, y = n)) +
-  geom_col(fill = "steelblue") +
+  geom_col(fill = COL_VIRAL, colour = "black", linewidth = 0.3) +
   geom_text(aes(label = n), vjust = -0.3) +
   labs(title = "vOTU classification depth (PhaBOX2 / PhaGCN)",
        subtitle = sprintf("Deepest taxonomic rank each of the %d vOTUs could be confidently assigned to", nrow(taxonomy)),
@@ -1154,7 +1333,7 @@ viral_detected_by_participant |>
 p_viral_depth_by_participant <- viral_detected_by_participant |>
   count(participant, deepest_rank) |>
   ggplot(aes(x = deepest_rank, y = n, fill = participant)) +
-  geom_col(position = "dodge") +
+  geom_col(position = "dodge", colour = "black", linewidth = 0.3) +
   scale_fill_manual(values = PARTICIPANT_COLORS) +
   labs(title = "vOTU classification depth per participant (mapping-based detection)",
        x = "Deepest rank reached", y = "Number of vOTUs detected", fill = NULL) +
@@ -1221,8 +1400,16 @@ message(sprintf(
 
 # -----------------------------------------------------------------------
 # 3.4. BACTERIAL - overall genus composition (non-temporal, pooled across
-#      all samples) - top 15 genera by total abundance + "Other"
+#      all samples) - top 15 genera by total abundance ("Other" is kept in
+#      the data as genus_grouped but is NOT plotted - changed 2026-11-03)
 # -----------------------------------------------------------------------
+
+# Switch for every top-15 composition figure (3.4B, 3.5, 3.5B, 11.8). Default is FALSE
+# (true share of ALL bacterial reads; bars stop short of 1.0, the gap being everything
+# outside the top 15 - set 2026-11-03). TRUE
+# rescales each bar to the top-15 categories only (every bar reaches 1.0);
+# FALSE shows each category's true share of all reads (bars stop short of 1.0).
+composition_renormalise <- FALSE
 
 top_genera <- bacterial_long |>
   group_by(bacterial_genus) |>
@@ -1234,14 +1421,15 @@ bacterial_long <- bacterial_long |>
   mutate(genus_grouped = if_else(bacterial_genus %in% top_genera, bacterial_genus, "Other"))
 
 p_bacterial_genus_overall <- bacterial_long |>
+  filter(genus_grouped != "Other") |>
   group_by(genus_grouped) |>
   summarise(total_reads = sum(new_est_reads), .groups = "drop") |>
   mutate(genus_grouped = fct_reorder(genus_grouped, total_reads)) |>
   ggplot(aes(x = genus_grouped, y = total_reads)) +
-  geom_col(fill = COL_BACTERIAL) +
+  geom_col(fill = COL_BACTERIAL, colour = "black", linewidth = 0.3) +
   coord_flip() +
   labs(title = "Overall bacterial genus composition (pooled across all samples)",
-       subtitle = "Top 15 genera by total Bracken read count; remainder grouped as 'Other'",
+       subtitle = "Top 15 genera by total Bracken read count",
        x = NULL, y = "Total estimated reads") +
   theme_thesis()
 
@@ -1255,15 +1443,27 @@ print(style_figure(p_bacterial_genus_overall))
 # per-participant top-15) so the three bars share identical categories -
 # necessary for a fair visual comparison across participants.
 
-p_bacterial_genus_by_participant <- bacterial_long |>
+genus_by_participant <- bacterial_long |>
   group_by(participant, genus_grouped) |>
   summarise(total_reads = sum(new_est_reads), .groups = "drop") |>
-  ggplot(aes(x = participant, y = total_reads, fill = genus_grouped)) +
-  geom_col(position = "fill") +
-  scale_fill_viridis_d(option = "viridis") +
+  group_by(participant) |>
+  mutate(prop = total_reads / sum(total_reads)) |>
+  ungroup() |>
+  filter(genus_grouped != "Other") |>
+  group_by(participant) |>
+  mutate(prop_plot = if (composition_renormalise) prop / sum(prop) else prop) |>
+  ungroup()
+
+p_bacterial_genus_by_participant <- genus_by_participant |>
+  ggplot(aes(x = participant, y = prop_plot, fill = genus_grouped)) +
+  geom_col(position = "stack", colour = "black", linewidth = 0.2) +
+  scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_wes_d() +
   labs(title = "Bacterial genus composition per participant",
-       subtitle = "Pooled across each participant's own timepoints; top 15 genera overall + 'Other'",
-       x = NULL, y = "Proportion of reads", fill = NULL) +
+       subtitle = "Pooled across each participant's own timepoints; top 15 genera overall",
+       x = NULL,
+       y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+       fill = NULL) +
   theme_thesis() +
   theme(legend.position = "bottom")
 
@@ -1277,9 +1477,34 @@ print(style_figure(p_bacterial_genus_by_participant))
 #      timepoints into a single bar.
 # -----------------------------------------------------------------------
 
+# "Other" is NOT drawn on the over-time composition figures (changed 2026-11-03;
+# applies to Sections 3.5, 3.5B and 11.8). composition_renormalise = TRUE rescales
+# each bar to the top-15 categories only, so every bar reaches 1.0 and proportions
+# are relative to the top 15, not the whole community. FALSE shows each category's
+# true share of the sample's reads (bars stop short of 1.0 by the share that falls
+# outside the top 15).
+composition_renormalise <- FALSE
+
 genus_over_time <- bacterial_long |>
   group_by(participant, sample_id, timepoint, genus_grouped) |>
-  summarise(summed_reads = sum(new_est_reads), .groups = "drop")
+  summarise(summed_reads = sum(new_est_reads), .groups = "drop") |>
+  group_by(participant, sample_id) |>
+  mutate(sample_total = sum(summed_reads)) |>
+  ungroup() |>
+  filter(genus_grouped != "Other") |>
+  mutate(prop = summed_reads / sample_total) |>
+  group_by(participant, sample_id) |>
+  mutate(prop_plot = if (composition_renormalise) prop / sum(prop) else prop) |>
+  ungroup()
+
+message("=== Share of each sample's reads covered by the top 15 genera (min / median / max per participant) ===")
+print(genus_over_time |>
+        group_by(participant, sample_id) |>
+        summarise(covered = sum(prop), .groups = "drop") |>
+        group_by(participant) |>
+        summarise(min_pct = round(100 * min(covered), 1),
+                  median_pct = round(100 * median(covered), 1),
+                  max_pct = round(100 * max(covered), 1)))
 
 # NOTE ON X-AXIS: this and Section 3.5B stay on `timepoint` (sample order)
 # rather than moving to collection_date like the trend/line plots elsewhere
@@ -1291,14 +1516,17 @@ genus_over_time <- bacterial_long |>
 # specific chart type; integer_breaks() (Part 2) keeps the tick labels as
 # whole sample numbers rather than ggplot's default fractional breaks.
 p_bacterial_genus_over_time <- ggplot(genus_over_time,
-                                      aes(x = timepoint, y = summed_reads, fill = genus_grouped)) +
-  geom_col(position = "fill") +
+                                       aes(x = timepoint, y = prop_plot, fill = genus_grouped)) +
+  geom_col(position = "stack", colour = "black", linewidth = 0.2) +
   antibiotic_marker() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_x_continuous(breaks = integer_breaks) +
-  scale_fill_viridis_d(option = "viridis") +
-  labs(title = "Bacterial genus composition over time (top 15 genera + Other)",
-       x = "Timepoint (sample order)", y = "Proportion of reads", fill = NULL) +
+  scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_wes_d() +
+  labs(title = "Bacterial genus composition over time (top 15 genera)",
+       x = "Timepoint (sample order)",
+       y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+       fill = NULL) +
   theme_thesis() +
   theme(legend.position = "bottom")
 
@@ -1317,21 +1545,26 @@ print(style_figure(p_bacterial_genus_over_time))
 # applied conditionally here, only when plotting L1.
 
 for (p in unique(genus_over_time$participant)) {
-  
+
   plot_data <- genus_over_time |> filter(participant == p)
-  
-  gg <- ggplot(plot_data, aes(x = timepoint, y = summed_reads, fill = genus_grouped)) +
-    geom_col(position = "fill") +
+
+  gg <- ggplot(plot_data, aes(x = timepoint, y = prop_plot, fill = genus_grouped)) +
+    geom_col(position = "stack", colour = "black", linewidth = 0.2) +
     scale_x_continuous(breaks = integer_breaks) +
-    scale_fill_viridis_d(option = "viridis") +
+    scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+    scale_fill_wes_d() +
     labs(title = paste0("Bacterial genus composition over time - ", p),
-         subtitle = "Top 15 genera overall + 'Other' (proportion of reads, abundance-weighted)",
-         x = "Timepoint (sample order)", y = "Proportion of reads", fill = NULL) +
+         subtitle = if (composition_renormalise)
+           "Top 15 genera overall (proportion of top-15 reads, abundance-weighted)"
+         else "Top 15 genera overall (proportion of all reads, abundance-weighted)",
+         x = "Timepoint (sample order)",
+         y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+         fill = NULL) +
     theme_thesis() +
     theme(legend.position = "bottom")
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker()
-  
+
   print(style_figure(gg))
 }
 
@@ -1408,23 +1641,23 @@ genus_line_data <- genus_reads_full |>
   semi_join(candidate_genera, by = c("participant", "bacterial_genus"))
 
 for (p in unique(genus_line_data$participant)) {
-  
+
   plot_data <- genus_line_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
     geom_line(colour = COL_BACTERIAL_DARK) +
-    geom_point(size = 1.8, colour = COL_BACTERIAL_DARK) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL_DARK, colour = "black", stroke = 0.4) +
     facet_wrap(~ bacterial_genus, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Most variable bacterial genera over time - ", p),
          subtitle = "Top 8 genera by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(face = "bold.italic"))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1455,23 +1688,23 @@ genus_line_data_stable <- genus_reads_full |>
   semi_join(candidate_genera_stable, by = c("participant", "bacterial_genus"))
 
 for (p in unique(genus_line_data_stable$participant)) {
-  
+
   plot_data <- genus_line_data_stable |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
     geom_line(colour = COL_BACTERIAL_LIGHT) +
-    geom_point(size = 1.8, colour = COL_BACTERIAL_LIGHT) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL_LIGHT, colour = "black", stroke = 0.4) +
     facet_wrap(~ bacterial_genus, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Least variable (most stable) bacterial genera over time - ", p),
          subtitle = "Bottom 8 genera by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(face = "bold.italic"))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1518,23 +1751,23 @@ species_line_data <- species_reads_full |>
   semi_join(candidate_species, by = c("participant", "bacterial_taxon"))
 
 for (p in unique(species_line_data$participant)) {
-  
+
   plot_data <- species_line_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
     geom_line(colour = COL_BACTERIAL_DARK) +
-    geom_point(size = 1.8, colour = COL_BACTERIAL_DARK) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL_DARK, colour = "black", stroke = 0.4) +
     facet_wrap(~ bacterial_taxon, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Most variable bacterial species over time - ", p),
          subtitle = "Top 8 species by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(size = 7, face = "bold.italic"))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1556,23 +1789,23 @@ species_line_data_stable <- species_reads_full |>
   semi_join(candidate_species_stable, by = c("participant", "bacterial_taxon"))
 
 for (p in unique(species_line_data_stable$participant)) {
-  
+
   plot_data <- species_line_data_stable |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
     geom_line(colour = COL_BACTERIAL_LIGHT) +
-    geom_point(size = 1.8, colour = COL_BACTERIAL_LIGHT) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL_LIGHT, colour = "black", stroke = 0.4) +
     facet_wrap(~ bacterial_taxon, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Least variable (most stable) bacterial species over time - ", p),
          subtitle = "Bottom 8 species by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(size = 7, face = "bold.italic"))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1643,22 +1876,22 @@ votu_line_data <- votu_reads_full |>
   mutate(facet_label = paste0(votu_display, "\n", taxon_label))
 
 for (p in unique(votu_line_data$participant)) {
-  
+
   plot_data <- votu_line_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = abund)) +
     geom_line(colour = COL_VIRAL_DARK) +
-    geom_point(size = 1.8, colour = COL_VIRAL_DARK) +
+    geom_point(shape = 21, size = 1.8, fill = COL_VIRAL_DARK, colour = "black", stroke = 0.4) +
     facet_wrap(~ facet_label, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Most variable vOTUs over time - ", p),
          subtitle = "Top 8 vOTUs by coefficient of variation (detected in >=4 of this participant's own timepoints, via read-mapping)",
          x = "Collection date", y = "CoverM trimmed-mean coverage") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1690,22 +1923,22 @@ votu_line_data_stable <- votu_reads_full |>
   mutate(facet_label = paste0(votu_display, "\n", taxon_label))
 
 for (p in unique(votu_line_data_stable$participant)) {
-  
+
   plot_data <- votu_line_data_stable |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = abund)) +
     geom_line(colour = COL_VIRAL_LIGHT) +
-    geom_point(size = 1.8, colour = COL_VIRAL_LIGHT) +
+    geom_point(shape = 21, size = 1.8, fill = COL_VIRAL_LIGHT, colour = "black", stroke = 0.4) +
     facet_wrap(~ facet_label, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Least variable (most stable) vOTUs over time - ", p),
          subtitle = "Bottom 8 vOTUs by coefficient of variation (detected in >=4 of this participant's own timepoints, via read-mapping)",
          x = "Collection date", y = "CoverM trimmed-mean coverage") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -1753,7 +1986,7 @@ phold_votu <- phold_annotations |>
 # -----------------------------------------------------------------------
 
 p_function_overall <- ggplot(phold_annotations, aes(x = fct_infreq(`function`))) +
-  geom_bar(fill = COL_VIRAL) +
+  geom_bar(fill = COL_VIRAL, colour = "black", linewidth = 0.3) +
   coord_flip() +
   labs(title = "Overall functional category composition (all genes, all vOTUs)",
        x = NULL, y = "Number of genes") +
@@ -1774,10 +2007,10 @@ phold_votu_lifestyle <- phold_votu |>
   filter(TYPE != "-")
 
 p_function_by_lifestyle <- ggplot(phold_votu_lifestyle,
-                                  aes(x = `function`, fill = TYPE)) +
-  geom_bar(position = "fill") +
+                                   aes(x = `function`, fill = TYPE)) +
+  geom_bar(position = "fill", colour = "black", linewidth = 0.2) +
   coord_flip() +
-  scale_fill_viridis_d(option = "viridis") +
+  scale_fill_wes_d() +
   labs(title = "Functional category composition by phage lifestyle",
        x = NULL, y = "Proportion", fill = "Lifestyle") +
   theme_thesis()
@@ -1820,12 +2053,12 @@ functional_summary <- functional_abundance_long |>
 # distort bar widths/gaps rather than clarify anything. integer_breaks()
 # keeps tick labels as whole sample numbers.
 p_function_over_time <- ggplot(functional_summary,
-                               aes(x = timepoint, y = summed_abundance, fill = `function`)) +
-  geom_col(position = "fill") +
+                                aes(x = timepoint, y = summed_abundance, fill = `function`)) +
+  geom_col(position = "fill", colour = "black", linewidth = 0.2) +
   antibiotic_marker() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_x_continuous(breaks = integer_breaks) +
-  scale_fill_viridis_d(option = "viridis") +
+  scale_fill_wes_d() +
   labs(title = "Functional category composition over time (abundance-weighted)",
        x = "Timepoint (sample order)", y = "Proportion of abundance", fill = NULL) +
   theme_thesis() +
@@ -1846,7 +2079,7 @@ amg_over_time <- functional_summary |>
 
 p_amg_over_time <- ggplot(amg_over_time, aes(x = collection_date, y = summed_abundance)) +
   geom_line(colour = COL_AMG) +
-  geom_point(size = 2, colour = COL_AMG) +
+  geom_point(shape = 21, size = 2, fill = COL_AMG, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   participant_date_scales() +
@@ -1885,7 +2118,7 @@ votu_function_lifestyle <- votu_function_presence |>
 lifestyle_function_table <- table(votu_function_lifestyle$`function`, votu_function_lifestyle$TYPE)
 
 message(sprintf("=== Lifestyle x function contingency table (vOTU-level; %d vOTUs with both a lifestyle call and >=1 annotated function) ===",
-                n_distinct(votu_function_lifestyle$votu_id)))
+                 n_distinct(votu_function_lifestyle$votu_id)))
 print(lifestyle_function_table)
 # One Fisher's exact test per function category (2x2: vOTU carries the
 # function yes/no x temperate/virulent). A vOTU carries several functions,
@@ -1933,6 +2166,34 @@ print(as.data.frame(lifestyle_function_fisher |>
                       mutate(across(c(prop_temperate, prop_virulent, odds_ratio), ~ round(.x, 2)),
                              across(c(fisher_p, fisher_p_adj_BH), ~ signif(.x, 3)))),
       row.names = FALSE)
+# Prevalence plot with the Fisher results on it (added 2026-11-09; the formal-test
+# counterpart of the proportion bars in 4.2)
+fisher_plot_data <- lifestyle_function_fisher |>
+  mutate(`function` = fct_reorder(`function`, prop_temperate - prop_virulent)) |>
+  select(`function`, prop_temperate, prop_virulent) |>
+  pivot_longer(c(prop_temperate, prop_virulent), names_to = "TYPE", values_to = "prop") |>
+  mutate(TYPE = recode(TYPE, prop_temperate = "temperate", prop_virulent = "virulent"))
+
+fisher_plot_labels <- lifestyle_function_fisher |>
+  mutate(`function` = factor(`function`, levels = levels(fisher_plot_data$`function`)),
+         y = pmax(prop_temperate, prop_virulent) + 0.03,
+         label = paste0("BH p = ", fmt_p(fisher_p_adj_BH), " ", p_stars(fisher_p_adj_BH)))
+
+p_function_prevalence <- ggplot(fisher_plot_data, aes(x = `function`, y = prop, fill = TYPE)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75, colour = "black", linewidth = 0.3) +
+  geom_text(data = fisher_plot_labels, aes(x = `function`, y = y, label = label),
+            inherit.aes = FALSE, hjust = 0, size = 3) +
+  coord_flip(clip = "off") +
+  scale_y_continuous(limits = c(0, 1.4), breaks = seq(0, 1, 0.25), labels = scales::percent) +
+  scale_fill_wes_d() +
+  labs(title = "Prevalence of each functional category in temperate vs virulent vOTUs",
+       subtitle = sprintf("Share of vOTUs carrying at least one gene in the category (temperate n = %d, virulent n = %d, vOTUs with a lifestyle call). Fisher's exact test per category, BH-adjusted across %d tests; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
+                          n_temp_votus, n_vir_votus, nrow(lifestyle_function_fisher)),
+       x = NULL, y = "vOTUs carrying the category", fill = "Lifestyle") +
+  theme_thesis()
+
+print(style_figure(p_function_prevalence, width = 10, height = 6))
+
 message("CAVEAT: this pools all 3 participants (lifestyle and function are fixed per-vOTU properties, not per-timepoint). The odds ratio is temperate:virulent (>1 = function more often carried by temperate vOTUs). Read alongside the uncalled vOTUs (about a third of the catalogue have no PhaTYP call).")
 
 # -----------------------------------------------------------------------
@@ -1953,16 +2214,16 @@ amg_window_test <- function(part) {
   d <- amg_over_time |>
     filter(participant == part) |>
     mutate(window = if_else(timepoint <= 4, "pre", "post"))
-  
+
   n_pre  <- sum(d$window == "pre")
   n_post <- sum(d$window == "post")
-  
+
   if (n_pre < 2 || n_post < 2) {
     return(tibble(participant = part, n_pre = n_pre, n_post = n_post,
-                  wilcoxon_p = NA_real_,
-                  note = "too few AMG-positive samples in one window to test"))
+                   wilcoxon_p = NA_real_,
+                   note = "too few AMG-positive samples in one window to test"))
   }
-  
+
   wt <- suppressWarnings(wilcox.test(summed_abundance ~ window, data = d))
   tibble(participant = part, n_pre = n_pre, n_post = n_post,
          wilcoxon_p = wt$p.value, note = NA_character_)
@@ -2054,18 +2315,18 @@ compute_participant_cooccurrence <- function(part) {
     filter(participant == part) |>
     distinct(sample_id) |>
     pull(sample_id)
-  
+
   mat <- abundance_wide |>
     select(contig, all_of(samples_this_participant)) |>
     column_to_rownames("contig") |>
     as.matrix()
-  
+
   # Drop vOTUs never detected in this participant's samples
   mat <- mat[rowSums(mat) > 0, , drop = FALSE]
-  
+
   clr_mat <- clr_transform_matrix(mat)
   cor_mat <- cor(t(clr_mat), method = "spearman")
-  
+
   cor_mat |>
     as_tibble(rownames = "contig.x") |>
     pivot_longer(-contig.x, names_to = "contig.y", values_to = "correlation") |>
@@ -2089,7 +2350,7 @@ cooccurrence_filtered <- cooccurrence_filtered |>
   filter(!is_same_parent(contig.x, contig.y))
 
 message(sprintf("Final edge count (>=3 shared samples, CLR Spearman correlation): %d",
-                nrow(cooccurrence_filtered)))
+                 nrow(cooccurrence_filtered)))
 
 # Clean vOTU display labels for the heatmap below (see Part 1, Section
 # 1.1f) - contig.x/contig.y are KEPT as-is for the diagnostic tables
@@ -2139,20 +2400,20 @@ print(cooccurrence_filtered |> count(reliability))
 
 for (part in all_participants) {
   part_data <- cooccurrence_filtered |> filter(participant == part)
-  
+
   if (nrow(part_data) == 0) {
     message(sprintf("No qualifying pairs for %s - skipping plot", part))
     next
   }
-  
+
   n_labels <- length(union(part_data$votu_display.x, part_data$votu_display.y))
-  
+
   heatmap_dim <- max(8, n_labels * 0.16)
-  
+
   p <- ggplot(part_data, aes(x = votu_display.x, y = votu_display.y, fill = correlation, alpha = shared_samples == 3)) +
     geom_tile() +
     scale_fill_gradient2(low = COL_DIV_LOW, mid = COL_DIV_MID, high = COL_DIV_HIGH,
-                         midpoint = 0, limits = c(-1, 1)) +
+                          midpoint = 0, limits = c(-1, 1)) +
     scale_alpha_manual(values = c(`TRUE` = 0.35, `FALSE` = 1), guide = "none") +
     labs(title = sprintf("%s: within-participant vOTU co-occurrence (exploratory)", part),
          subtitle = "CLR-transformed Spearman correlation, pairs with >=3 shared samples - not significance-tested.\nFaded tiles = n=3 shared samples only (low reliability, see 5.3b). vOTU_### labels - see votu_display_lookup for the real contig IDs.",
@@ -2160,7 +2421,7 @@ for (part in all_participants) {
     theme_thesis() +
     heatmap_axis_theme(n_labels) +
     theme(legend.position = "right")
-  
+
   # width/height scale with how many vOTUs are on each axis - the image
   # saved to FIGURES_DIR (by style_figure(), see Part 2) is the one to
   # actually use in the thesis; the Plots-pane preview will still look
@@ -2222,7 +2483,7 @@ candidate_votu_functions |>
   group_by(participant, contig, taxon_label, cv, n_detected) |>
   summarise(
     functions = if (all(is.na(`function`))) "none annotated / no genes called"
-    else paste(sort(unique(`function`)), collapse = "; "),
+                else paste(sort(unique(`function`)), collapse = "; "),
     .groups = "drop"
   ) |>
   arrange(participant, desc(cv)) |>
@@ -2334,9 +2595,9 @@ if (length(unmatched_hosts) > 0) {
       distinct(bacterial_taxon) |>
       pull(bacterial_taxon)
     message(sprintf("  '%s' - %d near-match(es) at genus level: %s",
-                    h, length(near_matches),
-                    if (length(near_matches) == 0) "none (genuinely absent from bacterial_long)"
-                    else paste(near_matches, collapse = "; ")))
+                     h, length(near_matches),
+                     if (length(near_matches) == 0) "none (genuinely absent from bacterial_long)"
+                     else paste(near_matches, collapse = "; ")))
   }
 }
 
@@ -2399,25 +2660,36 @@ pair_plot_data <- pair_trajectories |>
   mutate(series = if_else(series == "phage_scaled", "Phage (vOTU)", "Predicted host"))
 
 for (p in unique(pair_plot_data$participant)) {
-  
+
   plot_data <- pair_plot_data |> filter(participant == p)
   if (nrow(plot_data) == 0) next
-  
+
+  # 3 panels per row; canvas height grows with the number of rows so the
+  # panels (and their date labels) are not squashed. Facet titles are wrapped
+  # and set in a smaller font so the vOTU / host name is never cut off.
+  n_pairs_p <- dplyr::n_distinct(plot_data$facet_label)
+  n_cols_p  <- min(3, n_pairs_p)
+  n_rows_p  <- ceiling(n_pairs_p / n_cols_p)
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = scaled_abundance, colour = series)) +
     geom_line() +
-    geom_point(size = 1.5) +
-    facet_wrap(~ facet_label, scales = "free_x") +
+    geom_point(aes(fill = series), shape = 21, size = 2, colour = "black", stroke = 0.4) +
+    facet_wrap(~ facet_label, scales = "free_x", ncol = n_cols_p,
+               labeller = labeller(facet_label = label_wrap_gen(width = 40))) +
     scale_colour_manual(values = c("Phage (vOTU)" = COL_VIRAL, "Predicted host" = COL_BACTERIAL)) +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_fill_manual(values = c("Phage (vOTU)" = COL_VIRAL, "Predicted host" = COL_BACTERIAL)) +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Phage:predicted-host abundance trajectories - ", p),
          subtitle = "GMPR-normalized phage abundance vs Bracken relative-abundance host fraction, min-max scaled within each pair for shape comparison",
-         x = "Collection date", y = "Scaled abundance (0-1)", colour = NULL) +
+         x = "Collection date", y = "Scaled abundance (0-1)", colour = NULL, fill = NULL) +
     theme_thesis() +
-    theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
-  
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          strip.text  = element_text(size = 7.5, face = "bold"))
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
-  print(style_figure(gg))
+
+  print(style_figure(gg, width = 11, height = max(4.5, 2.7 * n_rows_p + 1.3)))
 }
 
 # -----------------------------------------------------------------------
@@ -2478,10 +2750,10 @@ if (nrow(l1_pair_window) > 0) {
       phage_var_zero = length(unique(phage_abund)) <= 1,
       host_var_zero  = length(unique(host_abund)) <= 1,
       correlation    = if (phage_var_zero[1] || host_var_zero[1]) {
-        NA_real_
-      } else {
-        suppressWarnings(cor(phage_abund, host_abund, method = "spearman"))
-      },
+                          NA_real_
+                        } else {
+                          suppressWarnings(cor(phage_abund, host_abund, method = "spearman"))
+                        },
       na_reason = case_when(
         phage_var_zero[1] && host_var_zero[1] ~ "both phage and host abundance constant within this window",
         phage_var_zero[1] ~ "phage abundance constant within this window",
@@ -2519,13 +2791,13 @@ if (nrow(l1_pair_window) > 0) {
 
 get_participant_clr <- function(part, domain = c("viral", "bacterial")) {
   domain <- match.arg(domain)
-  
+
   if (domain == "viral") {
     samples_this_participant <- viral_long |>
       filter(participant == part) |>
       distinct(sample_id) |>
       pull(sample_id)
-    
+
     mat <- abundance_wide |>
       select(contig, all_of(samples_this_participant)) |>
       column_to_rownames("contig") |>
@@ -2539,7 +2811,7 @@ get_participant_clr <- function(part, domain = c("viral", "bacterial")) {
       column_to_rownames("bacterial_taxon") |>
       as.matrix()
   }
-  
+
   mat <- mat[rowSums(mat) > 0, , drop = FALSE]
   clr_transform_matrix(mat)
 }
@@ -2567,16 +2839,16 @@ distance_from_baseline <- function(clr_mat, baseline_samples) {
 
 compute_resilience_trajectory <- function(part, domain) {
   clr_mat <- get_participant_clr(part, domain)
-  
+
   samples_this_participant <- viral_long |>
     filter(participant == part) |>
     distinct(sample_id, timepoint, collection_date) |>
     arrange(timepoint)
-  
+
   baseline_samples <- samples_this_participant |>
     filter(timepoint <= 4) |>
     pull(sample_id)
-  
+
   distance_from_baseline(clr_mat, baseline_samples) |>
     left_join(samples_this_participant, by = "sample_id") |>
     mutate(participant = part, domain = domain)
@@ -2598,16 +2870,17 @@ print(resilience_trajectory |> arrange(domain, participant, timepoint), n = Inf)
 # -----------------------------------------------------------------------
 
 p_resilience_trajectory <- ggplot(resilience_trajectory,
-                                  aes(x = collection_date, y = aitchison_distance, colour = domain)) +
+                                   aes(x = collection_date, y = aitchison_distance, colour = domain)) +
   geom_line() +
-  geom_point(size = 2) +
+  geom_point(aes(fill = domain), shape = 21, size = 2.4, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_colour_manual(values = c("viral" = COL_VIRAL, "bacterial" = COL_BACTERIAL)) +
+  scale_fill_manual(values = c("viral" = COL_VIRAL, "bacterial" = COL_BACTERIAL)) +
   participant_date_scales() +
   labs(title = "Community distance from baseline over time (Aitchison/CLR distance)",
        subtitle = "Baseline = centroid of each participant's first 4 timepoints. For L1 this is the genuine pre-antibiotic state; for D3/G2 it's a structurally matched reference window only (no perturbation event), shown to gauge normal background drift",
-       x = "Collection date", y = "Aitchison distance from baseline centroid", colour = NULL) +
+       x = "Collection date", y = "Aitchison distance from baseline centroid", colour = NULL, fill = NULL) +
   theme_thesis() +
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
 
@@ -2638,8 +2911,8 @@ l1_resilience_check <- resilience_trajectory |>
     change_from_peak      = last_distance - peak_distance,
     pct_change_from_peak  = round(100 * change_from_peak / peak_distance, 1),
     direction             = if_else(change_from_peak < 0,
-                                    "declining from peak toward baseline (resilience)",
-                                    "still at or above peak (no recovery within this window)"),
+                                     "declining from peak toward baseline (resilience)",
+                                     "still at or above peak (no recovery within this window)"),
     .groups = "drop"
   )
 
@@ -2725,26 +2998,26 @@ build_window_network <- function(sample_ids, min_shared = 2) {
     select(contig, all_of(sample_ids)) |>
     column_to_rownames("contig") |>
     as.matrix()
-  
+
   mat <- mat[rowSums(mat > 0) >= min_shared, , drop = FALSE]
-  
+
   if (nrow(mat) < 2) {
     return(list(edges = tibble(contig.x = character(), contig.y = character(),
-                               correlation = numeric(), shared_samples = integer()),
+                                correlation = numeric(), shared_samples = integer()),
                 eligible_votus = rownames(mat)))
   }
-  
+
   clr_mat <- clr_transform_matrix(mat)
   cor_mat <- cor(t(clr_mat), method = "spearman")
-  
+
   presence <- (mat > 0)
   shared_counts <- presence %*% t(presence)  # vOTU x vOTU shared-sample counts
-  
+
   shared_long <- shared_counts |>
     as_tibble(rownames = "contig.x") |>
     pivot_longer(-contig.x, names_to = "contig.y", values_to = "shared_samples") |>
     filter(contig.x < contig.y)
-  
+
   edges <- cor_mat |>
     as_tibble(rownames = "contig.x") |>
     pivot_longer(-contig.x, names_to = "contig.y", values_to = "correlation") |>
@@ -2752,7 +3025,7 @@ build_window_network <- function(sample_ids, min_shared = 2) {
     inner_join(shared_long, by = c("contig.x", "contig.y")) |>
     filter(shared_samples >= min_shared) |>
     filter(!is_same_parent(contig.x, contig.y))  # see parent_contig_of() in Part 5
-  
+
   list(edges = edges, eligible_votus = rownames(mat))
 }
 
@@ -2780,7 +3053,7 @@ summarise_network <- function(net, window_label) {
   n_eligible         <- length(net$eligible_votus)
   n_edges            <- nrow(net$edges)
   max_possible_edges <- choose(n_eligible, 2)
-  
+
   tibble(
     window               = window_label,
     n_eligible_votus     = n_eligible,
@@ -2864,23 +3137,23 @@ network_edges_combined <- bind_rows(
 if (nrow(network_edges_combined) > 0) {
   n_labels <- max(length(union(l1_network_pre$edges$contig.x,  l1_network_pre$edges$contig.y)),
                   length(union(l1_network_post$edges$contig.x, l1_network_post$edges$contig.y)))
-  
+
   heatmap_dim <- max(8, n_labels * 0.16)
-  
+
   p_network_stability <- ggplot(network_edges_combined,
-                                aes(x = votu_display.x, y = votu_display.y, fill = correlation)) +
+                                 aes(x = votu_display.x, y = votu_display.y, fill = correlation)) +
     geom_tile() +
     scale_fill_gradient2(low = COL_DIV_LOW, mid = COL_DIV_MID, high = COL_DIV_HIGH,
-                         midpoint = 0, limits = c(-1, 1)) +
+                          midpoint = 0, limits = c(-1, 1)) +
     facet_wrap(~ window, scales = "free") +
     labs(title = "L1: vOTU co-occurrence network structure, pre vs post antibiotic (exploratory)",
          subtitle = sprintf("CLR-transformed Spearman correlation, pairs with >=2 shared samples within window - not significance-tested. Edge-set Jaccard overlap = %s. vOTU_### labels - see votu_display_lookup for the real contig IDs.",
-                            if (is.na(jaccard_index)) "NA" else sprintf("%.3f", jaccard_index)),
+                             if (is.na(jaccard_index)) "NA" else sprintf("%.3f", jaccard_index)),
          x = NULL, y = NULL, fill = "Correlation") +
     theme_thesis() +
     heatmap_axis_theme(n_labels) +
     theme(legend.position = "right")
-  
+
   # width/height scale with how many vOTUs are on each axis - this is
   # the L1 co-occurrence figure flagged as unusable at its default size;
   # the two side-by-side (pre/post) panels need a wide canvas.
@@ -2949,30 +3222,30 @@ window_turnover_for <- function(part, min_shared) {
     distinct(sample_id, timepoint)
   pre_ids  <- samp |> filter(timepoint <= 4) |> pull(sample_id)
   post_ids <- samp |> filter(timepoint >= 5) |> pull(sample_id)
-  
+
   net_pre  <- build_window_network(pre_ids,  min_shared = min_shared)
   net_post <- build_window_network(post_ids, min_shared = min_shared)
-  
+
   nodes_both <- intersect(net_pre$eligible_votus, net_post$eligible_votus)
   keep_edges <- function(e) e |> filter(contig.x %in% nodes_both, contig.y %in% nodes_both)
   e_pre  <- keep_edges(net_pre$edges)
   e_post <- keep_edges(net_post$edges)
-  
+
   ids_pre  <- edge_id(net_pre$edges);  ids_post  <- edge_id(net_post$edges)
   sn_pre   <- edge_id(e_pre);          sn_post   <- edge_id(e_post)
   shared_sn <- intersect(sn_pre, sn_post)
-  
+
   n_pairs <- choose(length(nodes_both), 2)
   d1 <- if (n_pairs > 0) length(sn_pre)  / n_pairs else NA_real_
   d2 <- if (n_pairs > 0) length(sn_post) / n_pairs else NA_real_
-  
+
   sign_agree <- NA_real_
   if (length(shared_sn) > 0) {
     s_pre  <- setNames(sign(e_pre$correlation),  sn_pre)[shared_sn]
     s_post <- setNames(sign(e_post$correlation), sn_post)[shared_sn]
     sign_agree <- mean(s_pre == s_post)
   }
-  
+
   tibble(
     participant = part, min_shared = min_shared,
     n_pre_samples = length(pre_ids), n_post_samples = length(post_ids),
@@ -3054,16 +3327,16 @@ window_wilcoxon_test <- function(d, ...) {
   d <- d |> mutate(window = if_else(timepoint <= 4, "pre", "post"))
   n_pre  <- sum(d$window == "pre")
   n_post <- sum(d$window == "post")
-  
+
   if (n_pre < 2 || n_post < 2) {
     return(tibble(n_pre = n_pre, n_post = n_post, wilcoxon_p = NA_real_,
-                  note = "too few samples in one window to test"))
+                   note = "too few samples in one window to test"))
   }
   if (length(unique(d$value)) <= 1) {
     return(tibble(n_pre = n_pre, n_post = n_post, wilcoxon_p = NA_real_,
-                  note = "no variance in this metric across the full series - test undefined"))
+                   note = "no variance in this metric across the full series - test undefined"))
   }
-  
+
   wt <- suppressWarnings(wilcox.test(value ~ window, data = d))
   tibble(n_pre = n_pre, n_post = n_post, wilcoxon_p = wt$p.value, note = NA_character_)
 }
@@ -3077,6 +3350,54 @@ diversity_abundance_window_tests <- window_test_input |>
 message("=== Viral/bacterial diversity + total abundance, pre- vs post-antibiotic-window Wilcoxon test (L1 = real event; D3/G2 = structurally matched reference only) ===")
 print(diversity_abundance_window_tests, n = Inf)
 message("CAVEAT: pre/post window sizes here are only 4-5 samples per participant (the full series, not a detected-only subset), so this test has very limited power at this size, same caveat as the AMG test in Part 4 Section 4.6 - treat any p-value here as suggestive at best, read against the D3/G2 reference rows rather than in isolation, and alongside Part 8's Aitchison-distance resilience trajectory (which tracks the SAME pre/post contrast as a continuous magnitude rather than a single test statistic).")
+
+
+
+# -----------------------------------------------------------------------
+# 9.7B. FIGURE - the data behind the pre/post window tests above (added 2026-11-09)
+# -----------------------------------------------------------------------
+# Every point is a sample; the bar is the median. Pre = timepoints 1-4, post = 5+.
+# L1 took tetracycline between its pre and post windows; D3 and G2 are unperturbed
+# and show the same split as a reference. p = unadjusted two-sided Wilcoxon rank-sum
+# (the 18 tests are not BH-adjusted; with 4 vs 4-6 samples the smallest attainable
+# p is about 0.014 to 0.029, so most will be non-significant).
+
+make_prepost_plot <- function(dom) {
+  metric_labels <- if (dom == "Viral")
+    c(richness = "Richness (vOTUs)", shannon = "Shannon diversity", total_abundance = "Total normalized abundance")
+  else
+    c(richness = "Richness (species)", shannon = "Shannon diversity", total_abundance = "Total Bracken reads")
+
+  d <- window_test_input |>
+    filter(domain == dom) |>
+    mutate(window = factor(if_else(timepoint <= 4, "pre", "post"), levels = c("pre", "post")),
+           metric = factor(metric, levels = c("richness", "shannon", "total_abundance")))
+
+  lab <- diversity_abundance_window_tests |>
+    filter(domain == dom) |>
+    mutate(metric = factor(metric, levels = levels(d$metric)),
+           label = if_else(is.na(wilcoxon_p), "not testable", paste0("p = ", fmt_p(wilcoxon_p))))
+
+  ggplot(d, aes(x = window, y = value)) +
+    stat_summary(fun = median, fun.min = median, fun.max = median, geom = "crossbar",
+                 width = 0.55, linewidth = 0.4, colour = "black") +
+    geom_point(aes(fill = window), shape = 21, size = 2.6, colour = "black", stroke = 0.4,
+               position = position_jitter(width = 0.1, height = 0, seed = 1)) +
+    geom_text(data = lab, aes(x = 1.5, y = Inf, label = label), inherit.aes = FALSE,
+              vjust = 1.5, size = 3) +
+    facet_grid(metric ~ participant, scales = "free_y",
+               labeller = labeller(metric = metric_labels)) +
+    scale_fill_manual(values = c(pre = ROYAL2[4], post = ROYAL1[2]), guide = "none") +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)), labels = scales::comma) +
+    labs(title = sprintf("Pre vs post window: %s diversity and abundance, by participant", tolower(dom)),
+         subtitle = "Each point is a sample; bar = median. Pre = timepoints 1-4, post = timepoints 5 and later. L1 took tetracycline between the two windows; D3 and G2 are unperturbed references. p = unadjusted two-sided Wilcoxon rank-sum test (4 vs 4-6 samples per window).",
+         x = NULL, y = NULL) +
+    theme_thesis() +
+    theme(strip.text.y = element_text(angle = 0, hjust = 0))
+}
+
+print(style_figure(make_prepost_plot("Viral"), width = 10, height = 7))
+print(style_figure(make_prepost_plot("Bacterial"), width = 10, height = 7))
 
 
 # #############################################################################
@@ -3117,25 +3438,238 @@ top_abundant_genus_line_data <- genus_reads_full |>
   semi_join(top_abundant_genera, by = c("participant", "bacterial_genus"))
 
 for (p in unique(top_abundant_genus_line_data$participant)) {
-  
+
   plot_data <- top_abundant_genus_line_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
     geom_line(colour = COL_BACTERIAL) +
-    geom_point(size = 1.8, colour = COL_BACTERIAL) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL, colour = "black", stroke = 0.4) +
     facet_wrap(~ bacterial_genus, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Most abundant bacterial genera over time - ", p),
          subtitle = "Top 8 genera by mean Bracken reads (zero-filled) - dominant members, not selected for variability",
          x = "Collection date", y = "Estimated reads (Bracken)") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(face = "bold.italic"))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
+
+# -----------------------------------------------------------------------
+# 10.1B. TABLE - top 10 bacterial SPECIES per participant (added 2026-10-29)
+# -----------------------------------------------------------------------
+# Ranked by mean estimated reads across the participant's own samples
+# (zero-filled, the same ranking rule as 10.1 and the abundance heatmaps).
+# Mean relative abundance is the mean of each sample's own proportion
+# (species reads / that sample's total Bracken reads after phage/human
+# filtering), so it is not driven by sequencing depth the way mean reads are.
+# "detected_in" = samples with reads > 0 / the participant's total samples.
+
+species_sample_totals <- species_reads_full |>
+  group_by(participant, sample_id) |>
+  summarise(sample_total = sum(reads), .groups = "drop")
+
+top_species_table <- species_reads_full |>
+  left_join(species_sample_totals, by = c("participant", "sample_id")) |>
+  mutate(rel_abundance = reads / sample_total) |>
+  group_by(participant, bacterial_taxon) |>
+  summarise(
+    mean_reads = mean(reads),
+    mean_rel_abundance_pct = 100 * mean(rel_abundance),
+    n_detected = sum(reads > 0),
+    n_samples  = n(),
+    .groups = "drop"
+  ) |>
+  group_by(participant) |>
+  slice_max(mean_reads, n = 10, with_ties = FALSE) |>
+  mutate(rank = row_number()) |>
+  ungroup() |>
+  transmute(
+    participant, rank,
+    species                = bacterial_taxon,
+    mean_reads             = round(mean_reads),
+    mean_rel_abundance_pct = round(mean_rel_abundance_pct, 2),
+    detected_in            = sprintf("%d/%d", n_detected, n_samples)
+  )
+
+message("=== Top 10 bacterial species per participant (by mean reads, zero-filled) ===")
+print(as.data.frame(top_species_table), row.names = FALSE)
+
+# -----------------------------------------------------------------------
+# 10.1C. TABLE - top 10 most abundant vOTUs per participant (added 2026-11-04)
+# -----------------------------------------------------------------------
+# Ranked by mean CoverM trimmed-mean coverage across the participant's own
+# samples (zero-filled, the same ranking rule as 10.2 and the vOTU heatmaps).
+# Mean relative abundance is the mean of each sample's own share of that
+# sample's total vOTU coverage, so it is not driven by sequencing depth.
+# "detected_in" = samples with coverage > 0 / the participant's total samples.
+# Labels match the figures: vOTU_### = votu_display_lookup, the real contig ID
+# is given alongside. Classification = deepest PhaBOX2 rank reached; lifestyle =
+# PhaTYP call; predicted host = PhaBOX2 species-level host (NA = none predicted).
+
+votu_sample_totals <- votu_reads_full |>
+  group_by(participant, sample_id) |>
+  summarise(sample_total = sum(abund), .groups = "drop")
+
+votu_attributes <- viral_long |>
+  distinct(contig, TYPE, host_species) |>
+  group_by(contig) |>
+  summarise(lifestyle = first(na.omit(TYPE)),
+            predicted_host = first(na.omit(host_species)),
+            .groups = "drop")
+
+top_votu_table <- votu_reads_full |>
+  left_join(votu_sample_totals, by = c("participant", "sample_id")) |>
+  mutate(rel_abundance = abund / sample_total) |>
+  group_by(participant, contig) |>
+  summarise(
+    mean_coverage = mean(abund),
+    mean_rel_abundance_pct = 100 * mean(rel_abundance),
+    n_detected = sum(abund > 0),
+    n_samples  = n(),
+    .groups = "drop"
+  ) |>
+  group_by(participant) |>
+  slice_max(mean_coverage, n = 10, with_ties = FALSE) |>
+  mutate(rank = row_number()) |>
+  ungroup() |>
+  left_join(votu_display_lookup |> select(contig, votu_display), by = "contig") |>
+  left_join(taxonomy |> select(contig, taxon_label), by = "contig") |>
+  left_join(votu_attributes, by = "contig") |>
+  transmute(
+    participant, rank,
+    votu                   = votu_display,
+    contig,
+    mean_coverage          = round(mean_coverage, 2),
+    mean_rel_abundance_pct = round(mean_rel_abundance_pct, 2),
+    detected_in            = sprintf("%d/%d", n_detected, n_samples),
+    classification         = taxon_label,
+    lifestyle              = lifestyle,
+    predicted_host         = predicted_host
+  )
+
+message("=== Top 10 vOTUs per participant (by mean CoverM coverage, zero-filled) ===")
+print(as.data.frame(top_votu_table), row.names = FALSE)
+
+top_votu_csv <- file.path(BASE, "results", "top10_votus_per_participant.csv")
+tryCatch({ readr::write_csv(top_votu_table, top_votu_csv); message("Wrote ", top_votu_csv) },
+         error = function(e) message("NOT WRITTEN (file open/locked?): ", top_votu_csv))
+
+# -----------------------------------------------------------------------
+# 10.1D. TABLE - distinct bacterial species vs vOTUs detected, per participant
+#        and overall, plus how many are shared between participants
+#        (added 2026-11-04). Detected = coverage / reads > 0 in at least one of
+#        that participant's samples. Bacterial unit = species-level Bracken taxon
+#        (host contamination already removed), viral unit = vOTU (151 catalogue).
+# -----------------------------------------------------------------------
+
+detected_sets <- bind_rows(
+  bacterial_long |> filter(new_est_reads > 0) |>
+    distinct(participant, unit = bacterial_taxon) |> mutate(domain = "Bacterial species"),
+  votu_reads_full |> filter(abund > 0) |>
+    distinct(participant, unit = contig) |> mutate(domain = "Viral (vOTU)")
+)
+
+detected_per_participant <- detected_sets |>
+  count(domain, participant, name = "n_detected") |>
+  bind_rows(
+    detected_sets |> distinct(domain, unit) |> count(domain, name = "n_detected") |>
+      mutate(participant = "All participants")
+  ) |>
+  arrange(domain, participant)
+
+message("=== Distinct bacterial species vs vOTUs detected (>=1 sample), per participant and overall ===")
+print(as.data.frame(detected_per_participant), row.names = FALSE)
+
+shared_summary <- detected_sets |>
+  group_by(domain, unit) |>
+  summarise(n_participants = n_distinct(participant), .groups = "drop") |>
+  count(domain, n_participants, name = "n_units") |>
+  group_by(domain) |>
+  mutate(pct_of_overall = round(100 * n_units / sum(n_units), 1)) |>
+  ungroup() |>
+  arrange(domain, n_participants)
+
+message("=== How many are found in 1, 2 or all 3 participants ===")
+print(as.data.frame(shared_summary), row.names = FALSE)
+
+pairwise_overlap <- detected_sets |>
+  group_by(domain) |>
+  group_modify(function(d, key) {
+    ps <- sort(unique(d$participant))
+    combn(ps, 2, simplify = FALSE) |>
+      lapply(function(pr) {
+        a <- d$unit[d$participant == pr[1]]; b <- d$unit[d$participant == pr[2]]
+        tibble(pair = paste(pr, collapse = " vs "), n_shared = length(intersect(a, b)),
+               n_union = length(union(a, b)),
+               jaccard = round(length(intersect(a, b)) / length(union(a, b)), 3))
+      }) |> bind_rows()
+  }) |> ungroup()
+
+message("=== Pairwise overlap between participants (Jaccard on detected sets) ===")
+print(as.data.frame(pairwise_overlap), row.names = FALSE)
+
+# -----------------------------------------------------------------------
+# 10.1E. CHECK - does the smaller number of detected vOTUs alone explain the low
+#        viral overlap between participants? (added 2026-11-04)
+# -----------------------------------------------------------------------
+# For each pair of participants, each participant's bacterial species list is
+# randomly thinned to the number of vOTUs detected in that same participant, the
+# Jaccard overlap is recomputed, and this is repeated n_thin times. The spread of
+# those bacterial Jaccards is what "same set sizes, bacterial-style sharing"
+# would give. Two thinning rules:
+#   uniform  - every detected species equally likely to be kept (lower bound:
+#              ignores that abundant, widely shared species are easiest to detect)
+#   weighted - species kept with probability proportional to their total reads in
+#              that participant (closer to how detection really behaves)
+# p_ge = share of thinned draws with Jaccard >= the observed viral Jaccard; a
+# large p_ge means set size alone is enough to give overlap this low, a very
+# small one means the viral overlap is lower than size alone predicts.
+# Caveat: the bacterial list is database-driven and the vOTU list is assembled
+# from this cohort, so a match supports "consistent with", not "caused by".
+
+n_thin <- 2000
+set.seed(20261104)
+
+bact_by_p <- bacterial_long |>
+  filter(new_est_reads > 0) |>
+  group_by(participant, bacterial_taxon) |>
+  summarise(w = sum(new_est_reads), .groups = "drop")
+n_votu_p <- detected_per_participant |>
+  filter(domain == "Viral (vOTU)", participant != "All participants") |>
+  select(participant, n_votu = n_detected)
+obs_viral <- pairwise_overlap |> filter(domain == "Viral (vOTU)") |> select(pair, observed_viral_jaccard = jaccard)
+
+thin_jaccard <- function(pa, pb, weighted) {
+  da <- bact_by_p |> filter(participant == pa); db <- bact_by_p |> filter(participant == pb)
+  ka <- n_votu_p$n_votu[n_votu_p$participant == pa]; kb <- n_votu_p$n_votu[n_votu_p$participant == pb]
+  vapply(seq_len(n_thin), function(i) {
+    a <- sample(da$bacterial_taxon, ka, prob = if (weighted) da$w else NULL)
+    b <- sample(db$bacterial_taxon, kb, prob = if (weighted) db$w else NULL)
+    length(intersect(a, b)) / length(union(a, b))
+  }, numeric(1))
+}
+
+thinning_check <- bind_rows(lapply(seq_len(nrow(obs_viral)), function(i) {
+  pr <- strsplit(obs_viral$pair[i], " vs ")[[1]]
+  obs <- obs_viral$observed_viral_jaccard[i]
+  u <- thin_jaccard(pr[1], pr[2], FALSE); w <- thin_jaccard(pr[1], pr[2], TRUE)
+  tibble(
+    pair = obs_viral$pair[i],
+    observed_viral_jaccard = obs,
+    bacterial_full_jaccard = pairwise_overlap$jaccard[pairwise_overlap$domain == "Bacterial species" & pairwise_overlap$pair == obs_viral$pair[i]],
+    uniform_mean  = round(mean(u), 3), uniform_lo  = round(quantile(u, 0.025), 3), uniform_hi  = round(quantile(u, 0.975), 3),
+    p_ge_uniform  = round(mean(u >= obs), 3),
+    weighted_mean = round(mean(w), 3), weighted_lo = round(quantile(w, 0.025), 3), weighted_hi = round(quantile(w, 0.975), 3),
+    p_ge_weighted = round(mean(w >= obs), 3)
+  )
+}))
+
+message(sprintf("=== Thinning check: bacterial lists cut to each participant's vOTU count (%d draws per pair) ===", n_thin))
+print(as.data.frame(thinning_check), row.names = FALSE)
 
 # -----------------------------------------------------------------------
 # 10.2. VIRAL - trajectories of the most ABUNDANT vOTUs (by mean CoverM
@@ -3161,22 +3695,22 @@ top_abundant_votu_line_data <- votu_reads_full |>
   mutate(facet_label = paste0(votu_display, "\n", taxon_label))
 
 for (p in unique(top_abundant_votu_line_data$participant)) {
-  
+
   plot_data <- top_abundant_votu_line_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = abund)) +
     geom_line(colour = COL_VIRAL) +
-    geom_point(size = 1.8, colour = COL_VIRAL) +
+    geom_point(shape = 21, size = 1.8, fill = COL_VIRAL, colour = "black", stroke = 0.4) +
     facet_wrap(~ facet_label, scales = "free_y") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Most abundant vOTUs over time - ", p),
          subtitle = "Top 8 vOTUs by mean CoverM trimmed-mean coverage - dominant members, not selected for variability",
          x = "Collection date", y = "CoverM trimmed-mean coverage") +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -3200,13 +3734,14 @@ genus_heatmap_data <- genus_reads_full |>
   ungroup()
 
 for (p in unique(genus_heatmap_data$participant)) {
-  
+
   plot_data <- genus_heatmap_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = bacterial_genus, fill = log1p(reads))) +
-    geom_tile(colour = "white", linewidth = 0.3) +
-    scale_fill_viridis_c(option = "magma", name = "log(reads + 1)") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    geom_tile(colour = "black", linewidth = 0.15) +
+    scale_fill_gradientn(colours = HEAT_BACTERIAL, name = "log(reads + 1)",
+                         guide = guide_colourbar(frame.colour = "black", ticks.colour = "black")) +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Bacterial genus abundance heatmap - ", p),
          subtitle = "Top 20 genera by mean abundance, every sample (zero-filled) - log-scaled for visibility across orders of magnitude",
          x = "Collection date", y = NULL) +
@@ -3214,9 +3749,9 @@ for (p in unique(genus_heatmap_data$participant)) {
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.text.y = element_text(size = 8, face = "italic"),
           legend.position = "right")
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -3246,13 +3781,14 @@ species_heatmap_data <- species_reads_full |>
   ungroup()
 
 for (p in unique(species_heatmap_data$participant)) {
-  
+
   plot_data <- species_heatmap_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = bacterial_taxon, fill = log1p(reads))) +
-    geom_tile(colour = "white", linewidth = 0.3) +
-    scale_fill_viridis_c(option = "magma", name = "log(reads + 1)") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    geom_tile(colour = "black", linewidth = 0.15) +
+    scale_fill_gradientn(colours = HEAT_BACTERIAL, name = "log(reads + 1)",
+                         guide = guide_colourbar(frame.colour = "black", ticks.colour = "black")) +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Bacterial species abundance heatmap - ", p),
          subtitle = "Top 20 species by mean abundance, every sample (zero-filled) - log-scaled for visibility across orders of magnitude",
          x = "Collection date", y = NULL) +
@@ -3260,9 +3796,9 @@ for (p in unique(species_heatmap_data$participant)) {
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.text.y = element_text(size = 7, face = "italic"),
           legend.position = "right")
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -3288,13 +3824,14 @@ votu_heatmap_data <- votu_reads_full |>
   ungroup()
 
 for (p in unique(votu_heatmap_data$participant)) {
-  
+
   plot_data <- votu_heatmap_data |> filter(participant == p)
-  
+
   gg <- ggplot(plot_data, aes(x = collection_date, y = facet_label, fill = log1p(abund))) +
-    geom_tile(colour = "white", linewidth = 0.3) +
-    scale_fill_viridis_c(option = "viridis", name = "log(coverage + 1)") +
-    scale_x_date(breaks = sort(unique(plot_data$collection_date)), date_labels = "%d %b %y") +
+    geom_tile(colour = "black", linewidth = 0.15) +
+    scale_fill_gradientn(colours = HEAT_VIRAL, name = "log(coverage + 1)",
+                         guide = guide_colourbar(frame.colour = "black", ticks.colour = "black")) +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
     labs(title = paste0("Viral vOTU abundance heatmap - ", p),
          subtitle = "Top 20 vOTUs by mean CoverM coverage, every sample - log-scaled for visibility across orders of magnitude",
          x = "Collection date", y = NULL) +
@@ -3302,9 +3839,9 @@ for (p in unique(votu_heatmap_data$participant)) {
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.text.y = element_text(size = 7),
           legend.position = "right")
-  
+
   if (p == "L1") gg <- gg + antibiotic_marker_date()
-  
+
   print(style_figure(gg))
 }
 
@@ -3348,7 +3885,7 @@ sample_meta <- viral_long |>
 get_combined_clr <- function(domain = c("viral", "bacterial")) {
   domain <- match.arg(domain)
   ids <- sample_meta$sample_id
-  
+
   if (domain == "viral") {
     mat <- abundance_wide |>
       select(contig, all_of(ids)) |>
@@ -3364,13 +3901,90 @@ get_combined_clr <- function(domain = c("viral", "bacterial")) {
       as.matrix()
     mat <- mat[, intersect(ids, colnames(mat)), drop = FALSE]
   }
-  
+
   mat <- mat[rowSums(mat) > 0, , drop = FALSE]
   clr_transform_matrix(mat)
 }
 
 combined_clr <- list(viral = get_combined_clr("viral"),
                      bacterial = get_combined_clr("bacterial"))
+
+# -----------------------------------------------------------------------
+# 11.1C. PERMANOVA (+ dispersion check) on the Aitchison distances behind the
+#        ordinations below (moved ahead of them 2026-11-09 so the results can be printed on the panels) (added 2026-11-06)
+# -----------------------------------------------------------------------
+# Two questions, each with a matching dispersion test:
+#   (1) Do samples group by PARTICIPANT? adonis2(distance ~ participant), all 27
+#       samples, per domain. R2 = share of the distance variation attributable to
+#       who the sample came from.
+#   (2) Do PRE (timepoints <= 4) and POST (>= 5) samples differ, within each
+#       participant? Same split as the rest of the script, so L1 (antibiotic) is
+#       read against D3 and G2 (no perturbation) - their R2 is what ordinary
+#       drift between the first and second half of sampling looks like. L1 = 4 pre
+#       / 5 post, D3 = 4 / 6, G2 = 4 / 4, so only 126, 210 and 70 distinct label
+#       arrangements exist: p-values have a floor of about 1/126, 1/210, 1/70.
+# Distance = Euclidean on CLR (the Aitchison distance of 11.1). PERMDISP
+# (betadisper) is reported beside every PERMANOVA because PERMANOVA is sensitive
+# to unequal spread: a "significant" result may reflect one group being more
+# scattered rather than centred somewhere else (L1 is visibly the most scattered).
+# CAVEATS to state when reporting: (a) samples from one person are not
+# independent, so for (1) the p-value is a descriptive test of "individual
+# signature" rather than a formal inference about a population of people (n = 3
+# people); (b) in (2) pre/post is confounded with time (and for L1 with a 33-day
+# gap), so a difference cannot be attributed to the antibiotic alone - the D3/G2
+# reference is what makes it interpretable; (c) with 6 pre/post tests, BH
+# adjustment is applied across those six.
+
+if (!requireNamespace("vegan", quietly = TRUE)) {
+  message("Installing 'vegan' (needed for PERMANOVA / PERMDISP, section 11.1C)...")
+  install.packages("vegan")
+}
+
+n_perm <- 9999
+set.seed(20261106)
+
+run_permanova <- function(d, group, nperm = n_perm) {
+  grp <- factor(group)
+  fit <- vegan::adonis2(d ~ grp, data = data.frame(grp = grp), permutations = nperm)
+  bd  <- vegan::betadisper(d, grp)
+  pd  <- vegan::permutest(bd, permutations = nperm)
+  tibble(n_samples = attr(d, "Size"),
+         R2 = fit$R2[1], pseudo_F = fit$F[1],
+         p_permanova = fit$`Pr(>F)`[1],
+         p_permdisp  = pd$tab$`Pr(>F)`[1])
+}
+
+# (1) participant effect, all samples
+permanova_participant <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
+  clr  <- combined_clr[[dom]]
+  meta <- sample_meta |> filter(sample_id %in% colnames(clr))
+  d    <- dist(t(clr[, meta$sample_id, drop = FALSE]))
+  run_permanova(d, meta$participant) |> mutate(domain = dom, .before = 1)
+})
+
+message("=== PERMANOVA: do samples group by participant? (Aitchison, 9,999 permutations) ===")
+print(as.data.frame(permanova_participant |>
+        mutate(across(c(R2, pseudo_F), ~ signif(.x, 3)))), row.names = FALSE)
+
+# (2) pre vs post within each participant (same split as the rest of the script)
+permanova_prepost <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
+  purrr::map_dfr(all_participants, function(part) {
+    clr  <- get_participant_clr(part, dom)
+    meta <- sample_meta |> filter(participant == part, sample_id %in% colnames(clr)) |>
+      mutate(period = if_else(timepoint <= 4, "pre", "post"))
+    d <- dist(t(clr[, meta$sample_id, drop = FALSE]))
+    run_permanova(d, meta$period) |>
+      mutate(domain = dom, participant = part,
+             n_pre = sum(meta$period == "pre"), n_post = sum(meta$period == "post"),
+             .before = 1)
+  })
+}) |>
+  mutate(p_permanova_adj_BH = p.adjust(p_permanova, method = "BH"))
+
+message("=== PERMANOVA: pre (<=4) vs post (>=5) per participant; L1 = antibiotic, D3/G2 = reference ===")
+print(as.data.frame(permanova_prepost |>
+        mutate(across(c(R2, pseudo_F), ~ signif(.x, 3)),
+               p_permanova_adj_BH = signif(p_permanova_adj_BH, 3))), row.names = FALSE)
 
 # -----------------------------------------------------------------------
 # 11.1. ORDINATION - PCoA of Aitchison distance (Euclidean on CLR)
@@ -3396,10 +4010,11 @@ run_pcoa <- function(clr_mat) {
 
 ordination_data <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
   o <- run_pcoa(combined_clr[[dom]])
+  pa <- permanova_participant |> filter(domain == dom)
   o$scores |>
     left_join(sample_meta, by = "sample_id") |>
-    mutate(panel = sprintf("%s (PC1 %.1f%%, PC2 %.1f%%)",
-                           str_to_title(dom), o$pct[1], o$pct[2]))
+    mutate(panel = sprintf("%s (PC1 %.1f%%, PC2 %.1f%%)\nPERMANOVA by participant: R\u00b2 = %.2f, p = %s\nPERMDISP p = %s",
+                           str_to_title(dom), o$pct[1], o$pct[2], pa$R2, fmt_p(pa$p_permanova), fmt_p(pa$p_permdisp)))
 }) |>
   mutate(panel = factor(panel, levels = unique(panel)))
 
@@ -3410,16 +4025,18 @@ print(ordination_data |> distinct(panel))
 p_ordination <- ggplot(ordination_data,
                        aes(x = PC1, y = PC2, colour = participant, shape = phase)) +
   geom_path(aes(group = participant), alpha = 0.35, linewidth = 0.4) +
-  geom_point(size = 3) +
-  geom_text(aes(label = timepoint), vjust = -1, size = 2.6, show.legend = FALSE) +
+  geom_point(aes(fill = participant), size = 3.2, colour = "black", stroke = 0.4) +
+  geom_text(aes(label = timepoint), colour = "black", vjust = -1, size = 2.6, show.legend = FALSE) +
   facet_wrap(~ panel, scales = "free") +
   scale_colour_manual(values = PARTICIPANT_COLORS) +
-  scale_shape_manual(values = c("no perturbation" = 16,
-                                "L1 pre-antibiotic" = 1,
-                                "L1 post-antibiotic" = 17)) +
+  scale_fill_manual(values = PARTICIPANT_COLORS) +
+  scale_shape_manual(values = c("no perturbation" = 21,
+                                "L1 pre-antibiotic" = 22,
+                                "L1 post-antibiotic" = 24)) +
+  guides(colour = "none", fill = guide_legend(override.aes = list(shape = 21))) +
   labs(title = "Sample ordination (PCoA of Aitchison distance), all participants",
-       subtitle = "Each point is one sample, numbered by timepoint and joined in time order within participant. Hollow circle = L1 before antibiotic, triangle = L1 after.",
-       x = "PC1", y = "PC2", colour = "Participant", shape = NULL) +
+       subtitle = "Each point is one sample, numbered by timepoint and joined in time order within participant. Circle = no perturbation, square = L1 before antibiotic, triangle = L1 after.",
+       x = "PC1", y = "PC2", fill = "Participant", shape = NULL) +
   theme_thesis()
 
 print(style_figure(p_ordination, width = 11, height = 5.5))
@@ -3428,10 +4045,14 @@ print(style_figure(p_ordination, width = 11, height = 5.5))
 # antibiotic contrast isn't swamped by between-person variation.
 l1_ordination_data <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
   o <- run_pcoa(get_participant_clr("L1", dom))
+  pp <- permanova_prepost |> filter(domain == dom)
+  l1 <- pp |> filter(participant == "L1")
+  ref <- pp |> filter(participant != "L1") |> arrange(participant)
   o$scores |>
     left_join(sample_meta, by = "sample_id") |>
-    mutate(panel = sprintf("%s (PC1 %.1f%%, PC2 %.1f%%)",
-                           str_to_title(dom), o$pct[1], o$pct[2]))
+    mutate(panel = sprintf("%s (PC1 %.1f%%, PC2 %.1f%%)\nPERMANOVA pre vs post: R\u00b2 = %.2f, p = %s (BH %s)\nPERMDISP p = %s; D3/G2 reference R\u00b2 = %.2f / %.2f",
+                           str_to_title(dom), o$pct[1], o$pct[2], l1$R2, fmt_p(l1$p_permanova),
+                           fmt_p(l1$p_permanova_adj_BH), fmt_p(l1$p_permdisp), ref$R2[1], ref$R2[2]))
 }) |>
   mutate(panel = factor(panel, levels = unique(panel)))
 
@@ -3446,16 +4067,16 @@ print(l1_ordination_data |>
         mutate(across(where(is.double), ~ round(.x, 2))))
 
 p_ordination_l1 <- ggplot(l1_ordination_data,
-                          aes(x = PC1, y = PC2, colour = phase)) +
+                          aes(x = PC1, y = PC2, fill = phase)) +
   geom_path(aes(group = 1), colour = "grey60", linewidth = 0.4) +
-  geom_point(size = 3.2) +
-  geom_text(aes(label = timepoint), vjust = -1, size = 2.8, show.legend = FALSE) +
+  geom_point(shape = 21, size = 3.4, colour = "black", stroke = 0.4) +
+  geom_text(aes(label = timepoint), colour = "black", vjust = -1, size = 2.8, show.legend = FALSE) +
   facet_wrap(~ panel, scales = "free") +
-  scale_colour_manual(values = c("L1 pre-antibiotic" = COL_DIV_HIGH,
-                                 "L1 post-antibiotic" = COL_DIV_LOW)) +
+  scale_fill_manual(values = c("L1 pre-antibiotic" = COL_DIV_HIGH,
+                               "L1 post-antibiotic" = COL_DIV_LOW)) +
   labs(title = "L1 sample ordination (PCoA of Aitchison distance), before vs after antibiotic",
        subtitle = "L1's own samples only, numbered by timepoint and joined in time order. Axes are recomputed within L1, so they are not comparable with the all-participant ordination.",
-       x = "PC1", y = "PC2", colour = NULL) +
+       x = "PC1", y = "PC2", fill = NULL) +
   theme_thesis()
 
 print(style_figure(p_ordination_l1, width = 11, height = 5.5))
@@ -3507,11 +4128,11 @@ print(within_between_summary, n = Inf)
 print(within_between_ratio)
 
 p_within_between <- ggplot(pair_distances, aes(x = comparison, y = distance, fill = comparison)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.75) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.75, colour = "black") +
   geom_jitter(width = 0.15, size = 0.6, alpha = 0.3) +
   facet_wrap(~ domain, scales = "free_y", labeller = labeller(domain = str_to_title)) +
   scale_fill_manual(values = c(setNames(PARTICIPANT_COLORS, paste0("Within ", names(PARTICIPANT_COLORS))),
-                               "Between participants" = "grey70"),
+                               "Between participants" = COL_NEUTRAL_FILL),
                     guide = "none") +
   labs(title = "Within-person vs between-person community distance (Aitchison)",
        subtitle = "Every pair of samples; 'Within L1' includes pre-vs-post-antibiotic pairs. Descriptive only - pairwise distances share samples and are not independent.",
@@ -3520,6 +4141,228 @@ p_within_between <- ggplot(pair_distances, aes(x = comparison, y = distance, fil
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 
 print(style_figure(p_within_between, width = 10, height = 5.5))
+
+# -----------------------------------------------------------------------
+# 11.2B. FUNCTIONAL-PROFILE DISTANCE: stability within people, differences
+#        between people, and pre/post antibiotic (Aim B, 3.3.2 / 3.3.3 / 3.3.5)
+# -----------------------------------------------------------------------
+# Why: Aim B had no number for "is functional potential stable within a
+# person?" or "does it differ between people?" - only the stacked-composition
+# figure (Section 4.3) and the AMG test (4.6). This puts the Phold functional
+# profile of each sample into the same distance framework as the vOTU and
+# bacterial composition work (Aitchison = Euclidean on CLR).
+#
+# Profile = summed abundance per Phold functional category per sample, exactly
+# as in Section 4.3 (`functional_summary`): each detected vOTU's abundance is
+# added to EVERY category it carries (so a multi-category vOTU counts in each),
+# and "unknown function" is excluded. Each sample is converted to proportions
+# before the CLR so that total abundance (and therefore depth) cancels out.
+#
+# CAVEATS to state when reporting:
+#  (a) the profile has only a handful of categories (see `func_n_categories`),
+#      so distances are coarse and a zero (a category absent from a sample) is
+#      replaced by half the smallest non-zero proportion, as elsewhere;
+#  (b) the profile is a weighted summary of WHICH vOTUs are detected, so it
+#      inherits the detection/depth dependence of the vOTU table and is
+#      dominated by the most abundant vOTUs;
+#  (c) PERMANOVA across people (n = 3) is a description of an "individual
+#      signature", not an inference about a population; samples from one
+#      person are not independent;
+#  (d) pre vs post is confounded with time for L1 (33-day gap), so D3/G2 are
+#      the reference, as in Section 11.1C;
+#  (e) consecutive-sample distances are descriptive; the gaps between visits
+#      are uneven (days_between is kept) and are not rescaled.
+
+func_profile_wide <- functional_summary |>
+  select(sample_id, `function`, summed_abundance) |>
+  tidyr::pivot_wider(names_from = sample_id, values_from = summed_abundance,
+                     values_fill = 0)
+func_categories <- func_profile_wide$`function`
+func_n_categories <- length(func_categories)
+func_prop <- as.matrix(func_profile_wide[, -1])
+rownames(func_prop) <- func_categories
+func_prop <- sweep(func_prop, 2, colSums(func_prop), FUN = "/")
+
+func_clr  <- clr_transform_matrix(func_prop)
+func_dist <- dist(t(func_clr))
+func_dm   <- as.matrix(func_dist)
+
+message(sprintf("=== Functional profile: %d categories x %d samples (unknown function excluded) ===",
+                func_n_categories, ncol(func_prop)))
+
+# ---- (1) Stability within people: distance between consecutive samples ----
+func_consecutive <- purrr::map_dfr(all_participants, function(part) {
+  meta <- sample_meta |> filter(participant == part, sample_id %in% colnames(func_dm)) |>
+    arrange(timepoint)
+  purrr::map_dfr(seq_len(nrow(meta) - 1), function(i) {
+    tibble(participant = part,
+           from_sample = meta$sample_id[i], to_sample = meta$sample_id[i + 1],
+           from_timepoint = meta$timepoint[i], to_timepoint = meta$timepoint[i + 1],
+           to_date = meta$collection_date[i + 1],
+           days_between = as.numeric(meta$collection_date[i + 1] - meta$collection_date[i]),
+           functional_aitchison = func_dm[meta$sample_id[i], meta$sample_id[i + 1]])
+  })
+}) |>
+  mutate(participant = factor(participant, levels = all_participants))
+
+func_consecutive_summary <- func_consecutive |>
+  group_by(participant) |>
+  summarise(n_transitions = n(),
+            median_distance = median(functional_aitchison),
+            min_distance = min(functional_aitchison),
+            max_distance = max(functional_aitchison),
+            largest_step = paste0(from_sample[which.max(functional_aitchison)], " -> ",
+                                  to_sample[which.max(functional_aitchison)]),
+            .groups = "drop")
+
+message("=== Functional profile: Aitchison distance between consecutive samples ===")
+print(as.data.frame(func_consecutive_summary |>
+        mutate(across(c(median_distance, min_distance, max_distance), ~ signif(.x, 3)))),
+      row.names = FALSE)
+
+p_func_consecutive <- ggplot(func_consecutive,
+                             aes(x = to_date, y = functional_aitchison)) +
+  geom_line(colour = COL_VIRAL) +
+  geom_point(shape = 21, size = 2.4, fill = COL_VIRAL, colour = "black", stroke = 0.4) +
+  antibiotic_marker_date() +
+  facet_wrap(~ participant, scales = "free_x") +
+  participant_date_scales() +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
+  labs(title = "Functional category profile: distance between consecutive samples",
+       subtitle = "Aitchison distance between the Phold functional-category profiles of a sample and the one before it, plotted at the later sample's date.",
+       x = "Collection date (later sample of each pair)",
+       y = "Aitchison distance (functional profile)") +
+  theme_thesis() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(style_figure(p_func_consecutive, width = 10, height = 5))
+
+# ---- (2) Differences between people ----
+func_pairs <- {
+  ids <- rownames(func_dm)
+  idx <- which(upper.tri(func_dm), arr.ind = TRUE)
+  tibble(sample_a = ids[idx[, 1]], sample_b = ids[idx[, 2]], distance = func_dm[idx])
+} |>
+  left_join(sample_meta |> select(sample_id, participant_a = participant),
+            by = c("sample_a" = "sample_id")) |>
+  left_join(sample_meta |> select(sample_id, participant_b = participant),
+            by = c("sample_b" = "sample_id")) |>
+  mutate(type = if_else(participant_a == participant_b, "within", "between"),
+         comparison = if_else(type == "within", paste0("Within ", participant_a),
+                              "Between participants"),
+         comparison = factor(comparison,
+                             levels = c(paste0("Within ", sort(unique(sample_meta$participant))),
+                                        "Between participants")))
+
+func_within_between <- func_pairs |>
+  group_by(comparison) |>
+  summarise(n_pairs = n(), median_distance = median(distance),
+            mean_distance = mean(distance), .groups = "drop")
+
+func_within_between_ratio <- func_pairs |>
+  group_by(type) |>
+  summarise(median_distance = median(distance), .groups = "drop") |>
+  tidyr::pivot_wider(names_from = type, values_from = median_distance) |>
+  mutate(ratio_between_to_within = between / within)
+
+message("=== Functional profile: within- vs between-person Aitchison distance (descriptive) ===")
+print(as.data.frame(func_within_between |>
+        mutate(across(c(median_distance, mean_distance), ~ signif(.x, 3)))), row.names = FALSE)
+print(as.data.frame(func_within_between_ratio |> mutate(across(everything(), ~ signif(.x, 3)))),
+      row.names = FALSE)
+
+func_meta <- sample_meta |> filter(sample_id %in% colnames(func_dm))
+func_meta <- func_meta[match(colnames(func_dm), func_meta$sample_id), ]
+
+# PERMANOVA + PERMDISP: do samples group by participant? Overall, then each pair of people.
+func_permanova_participant <- run_permanova(func_dist, func_meta$participant) |>
+  mutate(test = "All three participants", .before = 1)
+
+func_permanova_pairs <- purrr::map_dfr(combn(all_participants, 2, simplify = FALSE), function(pr) {
+  keep <- func_meta$participant %in% pr
+  d <- as.dist(func_dm[keep, keep])
+  run_permanova(d, func_meta$participant[keep]) |>
+    mutate(test = paste(pr, collapse = " vs "), .before = 1)
+}) |>
+  mutate(p_permanova_adj_BH = p.adjust(p_permanova, method = "BH"))
+
+func_permanova_between <- bind_rows(func_permanova_participant, func_permanova_pairs)
+
+message("=== Functional profile PERMANOVA / PERMDISP by participant (Aitchison, 9,999 permutations; pairwise p BH across 3) ===")
+print(as.data.frame(func_permanova_between |>
+        mutate(across(where(is.numeric), ~ signif(.x, 3)))), row.names = FALSE)
+
+# Per-category view (descriptive + Kruskal-Wallis across participants, BH across categories)
+func_mean_profile <- as.data.frame(t(func_prop)) |>
+  tibble::rownames_to_column("sample_id") |>
+  tidyr::pivot_longer(-sample_id, names_to = "function", values_to = "proportion") |>
+  left_join(sample_meta |> select(sample_id, participant), by = "sample_id") |>
+  group_by(participant, `function`) |>
+  summarise(mean_proportion = mean(proportion), sd_proportion = sd(proportion),
+            .groups = "drop")
+
+func_category_tests <- as.data.frame(t(func_prop)) |>
+  tibble::rownames_to_column("sample_id") |>
+  tidyr::pivot_longer(-sample_id, names_to = "function", values_to = "proportion") |>
+  left_join(sample_meta |> select(sample_id, participant), by = "sample_id") |>
+  group_by(`function`) |>
+  summarise(kruskal_chisq = unname(kruskal.test(proportion ~ participant)$statistic),
+            p_kruskal = kruskal.test(proportion ~ participant)$p.value,
+            .groups = "drop") |>
+  mutate(p_adj_BH = p.adjust(p_kruskal, method = "BH")) |>
+  arrange(p_kruskal)
+
+message("=== Functional category proportion by participant: Kruskal-Wallis, BH across categories (exploratory; samples within a person are not independent) ===")
+print(as.data.frame(func_category_tests |>
+        mutate(across(where(is.numeric), ~ signif(.x, 3)))), row.names = FALSE)
+
+perm_all <- func_permanova_participant
+p_func_within_between <- ggplot(func_pairs, aes(x = comparison, y = distance, fill = comparison)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.75, colour = "black") +
+  geom_jitter(width = 0.15, size = 0.6, alpha = 0.3) +
+  scale_fill_manual(values = c(setNames(PARTICIPANT_COLORS, paste0("Within ", names(PARTICIPANT_COLORS))),
+                               "Between participants" = COL_NEUTRAL_FILL),
+                    guide = "none") +
+  # Test result printed inside the panel (style_figure() moves titles/subtitles to the caption).
+  annotate("text", x = -Inf, y = Inf, hjust = -0.05, vjust = 1.3, size = 3, lineheight = 0.95,
+           label = sprintf("PERMANOVA by participant: R\u00b2 = %.2f, p = %s\nPERMDISP p = %s",
+                           perm_all$R2, fmt_p(perm_all$p_permanova), fmt_p(perm_all$p_permdisp))) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  labs(title = "Functional category profile: within-person vs between-person distance",
+       subtitle = "Aitchison distance between the functional-category profiles of every pair of samples.",
+       x = NULL, y = "Aitchison distance (functional profile)") +
+  theme_thesis() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+print(style_figure(p_func_within_between, width = 7, height = 5))
+
+p_func_by_participant <- ggplot(func_mean_profile,
+                                aes(x = participant, y = mean_proportion, fill = `function`)) +
+  geom_col(position = "fill", colour = "black", linewidth = 0.2) +
+  scale_fill_wes_d() +
+  labs(title = "Functional category profile by participant (mean proportion of abundance)",
+       subtitle = "Mean across each participant's samples of the abundance-weighted functional-category proportions (unknown function excluded).",
+       x = NULL, y = "Mean proportion of abundance", fill = NULL) +
+  theme_thesis() +
+  theme(legend.position = "bottom")
+
+print(style_figure(p_func_by_participant, width = 7, height = 6))
+
+# ---- (3) Pre vs post antibiotic course (L1), D3/G2 as reference ----
+func_permanova_prepost <- purrr::map_dfr(all_participants, function(part) {
+  meta <- func_meta |> filter(participant == part) |>
+    mutate(period = if_else(timepoint <= 4, "pre", "post"))
+  d <- as.dist(func_dm[meta$sample_id, meta$sample_id])
+  run_permanova(d, meta$period) |>
+    mutate(participant = part, n_pre = sum(meta$period == "pre"),
+           n_post = sum(meta$period == "post"), .before = 1)
+}) |>
+  mutate(p_permanova_adj_BH = p.adjust(p_permanova, method = "BH"))
+
+message("=== Functional profile PERMANOVA: pre (<=4) vs post (>=5), L1 = antibiotic, D3/G2 = reference; BH across 3 ===")
+print(as.data.frame(func_permanova_prepost |>
+        mutate(across(where(is.numeric) & !c(n_pre, n_post, n_samples), ~ signif(.x, 3)))),
+      row.names = FALSE)
 
 # -----------------------------------------------------------------------
 # 11.3. CONSECUTIVE-SAMPLE MEMBERSHIP TURNOVER
@@ -3545,7 +4388,7 @@ consecutive_turnover <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
     meta <- sample_meta |> filter(participant == part) |> arrange(timepoint)
     pres <- presence_long |> filter(domain == dom, participant == part)
     sets <- split(pres$feature, pres$sample_id)
-    
+
     purrr::map_dfr(seq_len(nrow(meta) - 1), function(i) {
       a <- sets[[meta$sample_id[i]]]
       b <- sets[[meta$sample_id[i + 1]]]
@@ -3558,7 +4401,7 @@ consecutive_turnover <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
         to_date = meta$collection_date[i + 1],
         days_between = as.numeric(meta$collection_date[i + 1] - meta$collection_date[i]),
         jaccard_dissimilarity = if (union_n == 0) NA_real_
-        else 1 - length(intersect(a, b)) / union_n,
+                                else 1 - length(intersect(a, b)) / union_n,
         crosses_antibiotic = part == "L1" && meta$timepoint[i] == 4 && meta$timepoint[i + 1] == 5
       )
     })
@@ -3584,18 +4427,26 @@ message("=== Consecutive-sample turnover (Jaccard dissimilarity of detected memb
 print(turnover_domain_test)
 message("CAVEAT: 7-9 transitions per participant, so the paired test has limited power; the pattern across all three participants matters more than any single p-value.")
 
+# Test result printed inside each panel (strip labels were too long to fit).
+turnover_labels <- turnover_domain_test |>
+  mutate(label = sprintf("Viral vs bacterial, paired Wilcoxon\nBH p = %s %s (n = %d transitions)",
+                         fmt_p(p_adj_BH), p_stars(p_adj_BH), n_transitions))
+
 p_turnover <- ggplot(consecutive_turnover,
                      aes(x = to_date, y = jaccard_dissimilarity, colour = domain)) +
   geom_line() +
-  geom_point(size = 2) +
+  geom_point(aes(fill = domain), shape = 21, size = 2.4, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
+  geom_text(data = turnover_labels, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
+            hjust = -0.05, vjust = 1.3, size = 3, lineheight = 0.95) +
   facet_wrap(~ participant, scales = "free_x") +
   scale_colour_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
-  scale_y_continuous(limits = c(0, 1)) +
+  scale_fill_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
+  scale_y_continuous(limits = c(0, 1.12), breaks = seq(0, 1, 0.25)) +
   participant_date_scales() +
   labs(title = "Turnover between consecutive samples (Jaccard dissimilarity of detected membership)",
        subtitle = "Each point is the change in detected vOTUs (viral) or species (bacterial) between a sample and the one before it, plotted at the later sample's date. 1 = nothing shared, 0 = identical.",
-       x = "Collection date (later sample of each pair)", y = "Jaccard dissimilarity", colour = NULL) +
+       x = "Collection date (later sample of each pair)", y = "Jaccard dissimilarity", colour = NULL, fill = NULL) +
   theme_thesis() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
@@ -3647,17 +4498,17 @@ message("=== Richness vs sequencing depth (Bracken-assigned reads as depth proxy
 print(depth_correlations, n = Inf)
 message("READING THIS: a strong positive rho means richness partly tracks depth - report diversity results with that caveat. A weak/absent rho supports treating the richness fluctuation as biological.")
 
-p_depth <- ggplot(depth_richness, aes(x = bracken_reads, y = richness, colour = participant)) +
-  geom_point(size = 2.4) +
+p_depth <- ggplot(depth_richness, aes(x = bracken_reads, y = richness)) +
+  geom_point(aes(fill = participant), shape = 21, size = 2.6, colour = "black", stroke = 0.4) +
   geom_smooth(aes(group = 1), method = "lm", se = FALSE, colour = "grey40",
               linewidth = 0.5, linetype = "dashed") +
   facet_wrap(~ domain, scales = "free_y", labeller = labeller(domain = str_to_title)) +
   scale_x_log10(labels = scales::comma) +
-  scale_colour_manual(values = PARTICIPANT_COLORS) +
+  scale_fill_manual(values = PARTICIPANT_COLORS) +
   labs(title = "Richness vs sequencing depth",
        subtitle = "Each point is one sample. Depth proxy = total Bracken-assigned reads (log scale); dashed line = linear fit across all samples, for orientation only.",
        x = "Bracken-assigned reads per sample (depth proxy)", y = "Richness (features detected)",
-       colour = "Participant") +
+       fill = "Participant") +
   theme_thesis()
 
 print(style_figure(p_depth, width = 10, height = 5))
@@ -3704,12 +4555,13 @@ message("READING THIS: if L1's post/pre depth ratio is near 1 and no more extrem
 
 p_depth_time <- ggplot(depth_by_sample,
                        aes(x = collection_date, y = bracken_reads, colour = participant)) +
-  geom_line(linewidth = 0.5) +
-  geom_point(size = 2.2) +
+  geom_line(linewidth = 0.7) +
+  geom_point(aes(fill = participant), shape = 21, size = 2.6, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_y_log10(labels = scales::comma) +
   scale_colour_manual(values = PARTICIPANT_COLORS, guide = "none") +
+  scale_fill_manual(values = PARTICIPANT_COLORS, guide = "none") +
   participant_date_scales() +
   labs(title = "Sequencing depth over time",
        subtitle = "Total Bracken-assigned reads per sample (log scale); dashed line = L1's antibiotic course. D3/G2 have no event - shown as reference.",
@@ -3955,7 +4807,7 @@ genus_response <- purrr::map_dfr(all_participants, function(part) {
   pre  <- tps$sample_id[tps$timepoint <= 4]
   post <- tps$sample_id[tps$timepoint > 4]
   n_det <- detection_counts(genus_reads_full, "bacterial_genus", part)
-  
+
   tibble(
     participant   = part,
     bacterial_genus = rownames(clr),
@@ -3998,8 +4850,9 @@ genus_reference_data <- genus_response |>
   mutate(bacterial_genus = factor(bacterial_genus, levels = genus_levels))
 
 p_genus_response <- ggplot(l1_genus_plot_data, aes(x = delta_clr, y = bacterial_genus)) +
-  geom_col(aes(fill = direction), width = 0.7) +
+  geom_col(aes(fill = direction), width = 0.7, colour = "black", linewidth = 0.3) +
   geom_vline(xintercept = 0, colour = "grey30", linewidth = 0.4) +
+  geom_point(data = genus_reference_data, shape = 18, size = 4.2, colour = "black") +
   geom_point(data = genus_reference_data, aes(colour = participant),
              shape = 18, size = 3) +
   scale_fill_manual(values = c("TRUE" = COL_DIV_HIGH, "FALSE" = COL_DIV_LOW),
@@ -4047,7 +4900,7 @@ species_response <- purrr::map_dfr(all_participants, function(part) {
   pre  <- tps$sample_id[tps$timepoint <= 4]
   post <- tps$sample_id[tps$timepoint > 4]
   n_det <- detection_counts(species_reads_full, "bacterial_taxon", part)
-  
+
   tibble(
     participant     = part,
     bacterial_taxon = rownames(clr),
@@ -4111,8 +4964,9 @@ species_reference_data <- species_response |>
   mutate(bacterial_taxon = factor(bacterial_taxon, levels = species_levels))
 
 p_species_response <- ggplot(l1_species_plot_data, aes(x = delta_clr, y = bacterial_taxon)) +
-  geom_col(aes(fill = direction), width = 0.7) +
+  geom_col(aes(fill = direction), width = 0.7, colour = "black", linewidth = 0.3) +
   geom_vline(xintercept = 0, colour = "grey30", linewidth = 0.4) +
+  geom_point(data = species_reference_data, shape = 18, size = 4.2, colour = "black") +
   geom_point(data = species_reference_data, aes(colour = participant),
              shape = 18, size = 3) +
   scale_fill_manual(values = c("TRUE" = COL_DIV_HIGH, "FALSE" = COL_DIV_LOW),
@@ -4181,7 +5035,7 @@ message("CAVEAT: few lifestyle-called vOTUs per sample and 4-5 samples per windo
 p_temperate <- ggplot(lifestyle_by_sample,
                       aes(x = collection_date, y = temperate_fraction_abundance)) +
   geom_line(colour = COL_VIRAL) +
-  geom_point(size = 2, colour = COL_VIRAL) +
+  geom_point(shape = 21, size = 2, fill = COL_VIRAL, colour = "black", stroke = 0.4) +
   antibiotic_marker_date() +
   facet_wrap(~ participant, scales = "free_x") +
   scale_y_continuous(limits = c(0, 1), labels = scales::percent) +
@@ -4264,11 +5118,11 @@ if (nrow(host_genus_detected) > 0) {
     summarise(total = sum(n_votus), .groups = "drop") |>
     arrange(total) |>
     pull(host_genus)
-  
+
   p_host_genus <- ggplot(host_genus_detected |>
                            mutate(host_genus = factor(host_genus, levels = host_levels)),
                          aes(x = n_votus, y = host_genus, fill = participant)) +
-    geom_col(width = 0.7) +
+    geom_col(width = 0.7, colour = "black", linewidth = 0.3) +
     scale_fill_manual(values = PARTICIPANT_COLORS) +
     scale_x_continuous(breaks = integer_breaks, expand = expansion(mult = c(0, 0.08))) +
     labs(title = "Predicted host genera of the detected vOTUs, by participant",
@@ -4278,31 +5132,326 @@ if (nrow(host_genus_detected) > 0) {
          x = "vOTUs detected", y = NULL, fill = "Participant") +
     theme_thesis() +
     theme(axis.text.y = element_text(face = "italic"))
-  
+
   print(style_figure(p_host_genus, width = 8, height = 4.5))
 } else {
   message("No detected vOTUs have a species-level host prediction - skipping the host-genus figure.")
 }
 
 
+# -----------------------------------------------------------------------
+# 11.8. BACTERIAL - SPECIES composition over time (top 15 species)
+#       (added 2026-11-02)
+# -----------------------------------------------------------------------
+# Species-level counterpart to the genus figure in Section 3.5 ("Bacterial
+# genus composition over time (top 15 genera + Other)"). Same design: one
+# full-height proportion bar per sample, x = sample order (not calendar date,
+# so L1's uneven gaps do not distort bar widths), faceted by participant, with
+# the dashed antibiotic marker on L1 (and, like it, no "Other" category; see
+# composition_renormalise in Section 3.5). It sits here, after the last figure in
+# the run, so adding it does not renumber any figure exported before it.
+# The 15 species are the 15 with the most Bracken reads across ALL samples
+# (the same rule Section 3.4 uses for genera), so every panel uses identical
+# categories. A species that is dominant in one participant but not overall
+# is not drawn - compare with the per-participant top-10 table (10.1B).
+
+top_species_15 <- bacterial_long |>
+  group_by(bacterial_taxon) |>
+  summarise(total_reads = sum(new_est_reads), .groups = "drop") |>
+  slice_max(total_reads, n = 15, with_ties = FALSE) |>
+  arrange(desc(total_reads))
+
+message("=== Top 15 bacterial species overall (total Bracken reads, all 27 samples) ===")
+print(top_species_15 |>
+        mutate(pct_of_all_reads = round(100 * total_reads / sum(bacterial_long$new_est_reads), 2)),
+      n = Inf)
+
+species_sample_reads <- bacterial_long |>
+  group_by(participant, sample_id) |>
+  summarise(sample_total = sum(new_est_reads), .groups = "drop")
+
+species_over_time <- bacterial_long |>
+  filter(bacterial_taxon %in% top_species_15$bacterial_taxon) |>
+  mutate(species_grouped = factor(bacterial_taxon, levels = top_species_15$bacterial_taxon)) |>
+  group_by(participant, sample_id, timepoint, species_grouped) |>
+  summarise(summed_reads = sum(new_est_reads), .groups = "drop") |>
+  left_join(species_sample_reads, by = c("participant", "sample_id")) |>
+  mutate(prop = summed_reads / sample_total) |>
+  group_by(participant, sample_id) |>
+  mutate(prop_plot = if (composition_renormalise) prop / sum(prop) else prop) |>
+  ungroup()
+
+message("=== Share of each sample's reads covered by the top 15 species (min / median / max per participant) ===")
+print(species_over_time |>
+        group_by(participant, sample_id) |>
+        summarise(covered = sum(prop), .groups = "drop") |>
+        group_by(participant) |>
+        summarise(min_pct = round(100 * min(covered), 1),
+                  median_pct = round(100 * median(covered), 1),
+                  max_pct = round(100 * max(covered), 1)))
+
+# Species names in italics in the legend.
+species_legend_labels <- function(x) lapply(x, function(l) bquote(italic(.(l))))
+
+p_bacterial_species_over_time <- ggplot(species_over_time,
+                                         aes(x = timepoint, y = prop_plot, fill = species_grouped)) +
+  geom_col(position = "stack", colour = "black", linewidth = 0.2) +
+  antibiotic_marker() +
+  facet_wrap(~ participant, scales = "free_x") +
+  scale_x_continuous(breaks = integer_breaks) +
+  scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_wes_d(labels = species_legend_labels) +
+  guides(fill = guide_legend(ncol = 4, byrow = TRUE)) +
+  labs(title = "Bacterial species composition over time (top 15 species)",
+       x = "Timepoint (sample order)",
+       y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+       fill = NULL) +
+  theme_thesis() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8))
+
+
+# 11.8b. Overall species composition (pooled across all samples; counterpart of 3.4)
+p_bacterial_species_overall <- top_species_15 |>
+  mutate(bacterial_taxon = fct_reorder(bacterial_taxon, total_reads)) |>
+  ggplot(aes(x = bacterial_taxon, y = total_reads)) +
+  geom_col(fill = COL_BACTERIAL, colour = "black", linewidth = 0.3) +
+  coord_flip() +
+  labs(title = "Overall bacterial species composition (pooled across all samples)",
+       subtitle = "Top 15 species by total Bracken read count",
+       x = NULL, y = "Total estimated reads") +
+  theme_thesis() +
+  theme(axis.text.y = element_text(face = "italic"))
+
+print(style_figure(p_bacterial_species_overall))
+
+# 11.8c. Species composition per participant, summed over each participant's
+#        timepoints (counterpart of 3.4B)
+species_by_participant <- bacterial_long |>
+  mutate(species_grouped = if_else(bacterial_taxon %in% top_species_15$bacterial_taxon,
+                                   bacterial_taxon, "Other")) |>
+  group_by(participant, species_grouped) |>
+  summarise(total_reads = sum(new_est_reads), .groups = "drop") |>
+  group_by(participant) |>
+  mutate(prop = total_reads / sum(total_reads)) |>
+  ungroup() |>
+  filter(species_grouped != "Other") |>
+  mutate(species_grouped = factor(species_grouped, levels = top_species_15$bacterial_taxon)) |>
+  group_by(participant) |>
+  mutate(prop_plot = if (composition_renormalise) prop / sum(prop) else prop) |>
+  ungroup()
+
+message("=== Share of each participant's total reads covered by the top 15 species ===")
+print(species_by_participant |> group_by(participant) |>
+        summarise(pct_covered = round(100 * sum(prop), 1)))
+
+p_bacterial_species_by_participant <- ggplot(species_by_participant,
+                                              aes(x = participant, y = prop_plot, fill = species_grouped)) +
+  geom_col(position = "stack", colour = "black", linewidth = 0.2) +
+  scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+  scale_fill_wes_d(labels = species_legend_labels) +
+  guides(fill = guide_legend(ncol = 4, byrow = TRUE)) +
+  labs(title = "Bacterial species composition per participant",
+       subtitle = "Pooled across each participant's own timepoints; top 15 species overall",
+       x = NULL,
+       y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+       fill = NULL) +
+  theme_thesis() +
+  theme(legend.position = "bottom", legend.text = element_text(size = 8))
+
+print(style_figure(p_bacterial_species_by_participant, width = 10, height = 7))
+
+# Faceted over-time figure drawn here so the species figures export in the same order as the genus ones (overall, per participant, over time, then one per participant).
+print(style_figure(p_bacterial_species_over_time, width = 12, height = 7))
+
+# 11.8d. One species-over-time figure per participant (counterpart of 3.5B)
+for (p in unique(species_over_time$participant)) {
+
+  plot_data <- species_over_time |> filter(participant == p)
+
+  gg <- ggplot(plot_data, aes(x = timepoint, y = prop_plot, fill = species_grouped)) +
+    geom_col(position = "stack", colour = "black", linewidth = 0.2) +
+    scale_x_continuous(breaks = integer_breaks) +
+    scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
+    scale_fill_wes_d(labels = species_legend_labels) +
+    guides(fill = guide_legend(ncol = 4, byrow = TRUE)) +
+    labs(title = paste0("Bacterial species composition over time - ", p),
+         subtitle = if (composition_renormalise)
+           "Top 15 species overall (proportion of top-15 reads, abundance-weighted)"
+         else "Top 15 species overall (proportion of all reads, abundance-weighted)",
+         x = "Timepoint (sample order)",
+         y = if (composition_renormalise) "Proportion of top-15 reads" else "Proportion of all reads",
+         fill = NULL) +
+    theme_thesis() +
+    theme(legend.position = "bottom", legend.text = element_text(size = 8))
+
+  if (p == "L1") gg <- gg + antibiotic_marker()
+
+  print(style_figure(gg, width = 10, height = 7))
+}
+
+# 11.8e. Most abundant species over time per participant (counterpart of
+#        Section 10.1 / 3.6: top 8 by mean reads, zero-filled, not CV-selected)
+top_abundant_species <- species_reads_full |>
+  group_by(participant, bacterial_taxon) |>
+  summarise(mean_reads = mean(reads), .groups = "drop") |>
+  group_by(participant) |>
+  slice_max(mean_reads, n = 8, with_ties = FALSE) |>
+  arrange(participant, desc(mean_reads))
+
+message("=== Most abundant bacterial species per participant (by mean reads, not CV) ===")
+print(top_abundant_species, n = Inf)
+
+top_abundant_species_line_data <- species_reads_full |>
+  semi_join(top_abundant_species, by = c("participant", "bacterial_taxon"))
+
+for (p in unique(top_abundant_species_line_data$participant)) {
+
+  plot_data <- top_abundant_species_line_data |> filter(participant == p)
+
+  gg <- ggplot(plot_data, aes(x = collection_date, y = reads)) +
+    geom_line(colour = COL_BACTERIAL) +
+    geom_point(shape = 21, size = 1.8, fill = COL_BACTERIAL, colour = "black", stroke = 0.4) +
+    facet_wrap(~ bacterial_taxon, scales = "free_y",
+               labeller = labeller(bacterial_taxon = label_wrap_gen(width = 28))) +
+    scale_x_date(breaks = sort(unique(plot_data$collection_date)), labels = thin_date_labels) +
+    labs(title = paste0("Most abundant bacterial species over time - ", p),
+         subtitle = "Top 8 species by mean Bracken reads (zero-filled) - dominant members, not selected for variability",
+         x = "Collection date", y = "Estimated reads (Bracken)") +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          strip.text = element_text(face = "bold.italic", size = 8))
+
+  if (p == "L1") gg <- gg + antibiotic_marker_date()
+
+  print(style_figure(gg))
+}
+
+
+# -----------------------------------------------------------------------
+# 11.9. COMBINED trajectory plots - the ~8 taxa / vOTUs of each "most variable",
+#       "least variable" and "most abundant" set drawn together in ONE panel on
+#       a SHARED y-axis, so their absolute scales can be compared directly
+#       (the per-panel versions above deliberately use free y-axes). Added
+#       2026-11-03; sits at the end so no earlier figure is renumbered.
+# -----------------------------------------------------------------------
+# The y-axis is a pseudo-log (log10(x + 1)-style) scale: abundances span several
+# orders of magnitude (e.g. Bacteroides ~18,000 reads vs ~10 for a rare genus),
+# so on a linear axis everything except the top one or two lines would be flat
+# against zero. Pseudo-log keeps true zeros on the axis (absence is visible)
+# and labels stay in original units. Set combined_y_log <- FALSE for a linear axis.
+combined_y_log <- TRUE
+
+COMBINED_COLS <- c(ROYAL1[2], ROYAL1[4], ROYAL2[1], ROYAL2[5],
+                   shade_toward(ROYAL1[1], "black", 0.35),
+                   shade_toward(ROYAL2[3], "black", 0.30),
+                   "grey20",
+                   shade_toward(ROYAL2[4], "black", 0.35))
+COMBINED_SHAPES <- c(21, 22, 23, 24, 25, 21, 22, 23)
+
+combined_trajectory_plot <- function(plot_data, label_col, value_col, p, title, subtitle,
+                                     ylab, breaks_vec, italic = FALSE) {
+  d <- plot_data |>
+    mutate(.label = .data[[label_col]], .value = .data[[value_col]])
+  lvl <- d |> group_by(.label) |> summarise(m = mean(.value), .groups = "drop") |>
+    arrange(desc(m)) |> pull(.label)
+  d <- d |> mutate(.label = factor(.label, levels = lvl))
+  n <- length(lvl)
+
+  lab_fun <- if (italic) function(x) lapply(x, function(l) bquote(italic(.(l)))) else waiver()
+
+  ybreaks <- breaks_vec[breaks_vec <= max(d$.value, na.rm = TRUE) * 1.5]
+  ysc <- if (combined_y_log)
+    scale_y_continuous(trans = scales::pseudo_log_trans(base = 10),
+                       breaks = ybreaks, labels = scales::comma,
+                       expand = expansion(mult = c(0.02, 0.06)))
+  else scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0.02, 0.06)))
+
+  gg <- ggplot(d, aes(x = collection_date, y = .value, colour = .label, fill = .label,
+                      shape = .label, group = .label)) +
+    geom_line(linewidth = 0.7) +
+    geom_point(size = 2.2, colour = "black", stroke = 0.4) +
+    scale_colour_manual(values = COMBINED_COLS[seq_len(n)], labels = lab_fun) +
+    scale_fill_manual(values = COMBINED_COLS[seq_len(n)], labels = lab_fun) +
+    scale_shape_manual(values = COMBINED_SHAPES[seq_len(n)], labels = lab_fun) +
+    ysc +
+    scale_x_date(breaks = sort(unique(d$collection_date)), labels = thin_date_labels) +
+    labs(title = title, subtitle = subtitle,
+         x = "Collection date", y = ylab, colour = NULL, fill = NULL, shape = NULL) +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "right", legend.text = element_text(size = 8))
+
+  if (p == "L1") gg <- gg + antibiotic_marker_date()
+  gg
+}
+
+combined_sets <- list(
+  list(what = "bacterial genera", id = "bacterial_genus", y = "reads",
+       ylab = "Estimated reads (Bracken, pseudo-log scale)", italic = TRUE,
+       brk = c(0, 10, 100, 1e3, 1e4, 1e5, 1e6),
+       sets = list(
+         "Most variable"       = genus_line_data,
+         "Least variable (most stable)" = genus_line_data_stable,
+         "Most abundant"       = top_abundant_genus_line_data)),
+  list(what = "bacterial species", id = "bacterial_taxon", y = "reads",
+       ylab = "Estimated reads (Bracken, pseudo-log scale)", italic = TRUE,
+       brk = c(0, 10, 100, 1e3, 1e4, 1e5, 1e6),
+       sets = list(
+         "Most variable"       = species_line_data,
+         "Least variable (most stable)" = species_line_data_stable,
+         "Most abundant"       = top_abundant_species_line_data)),
+  list(what = "vOTUs", id = "votu_label", y = "abund",
+       ylab = "CoverM trimmed-mean coverage (pseudo-log scale)", italic = FALSE,
+       brk = c(0, 1, 3, 10, 30, 100, 300),
+       sets = list(
+         "Most variable"       = votu_line_data,
+         "Least variable (most stable)" = votu_line_data_stable,
+         "Most abundant"       = top_abundant_votu_line_data))
+)
+
+for (cs in combined_sets) {
+  for (set_name in names(cs$sets)) {
+    dat <- cs$sets[[set_name]]
+    if (cs$id == "votu_label")
+      dat <- dat |> mutate(votu_label = paste0(votu_display, " (", taxon_label, ")"))
+
+    for (p in unique(dat$participant)) {
+      gg <- combined_trajectory_plot(
+        dat |> filter(participant == p), cs$id, cs$y, p,
+        title    = paste0(set_name, " ", cs$what, " over time, combined - ", p),
+        subtitle = paste0("Same set as the separate panels, all series on one shared y-axis",
+                          if (combined_y_log) " (pseudo-log scale; zeros stay at 0)" else ""),
+        ylab = cs$ylab, breaks_vec = cs$brk, italic = cs$italic)
+      print(style_figure(gg, width = 11, height = 6))
+    }
+  }
+}
+
+
+# -----------------------------------------------------------------------
+# Export + print every figure, grouped by topic (see FIGURE_GROUPS in Part 2)
+# -----------------------------------------------------------------------
+export_figures_in_order()
+
+
 # #############################################################################
 # END-OF-SCRIPT: figure legend text + vOTU display-ID lookup (NEW 2026-09-29)
 # #############################################################################
 # Every figure's original title/subtitle (moved off the image itself by
-# style_figure(), see Part 2) is collected here in the order it was drawn,
+# style_figure(), see Part 2) is collected here in the grouped export order (same numbers as the PNG filenames),
 # so the actual wording is on hand when writing the thesis's real figure
 # legends - copy/adapt from this list rather than reconstructing captions
 # from the code. Printed as one block at the very end of the script so
 # it's the last thing visible after a full source() run.
 
 message(sprintf("=== Figure titles/subtitles captured for thesis figure legends (%d figures) ===",
-                length(figure_captions)))
+                 length(figure_captions)))
 for (i in seq_along(figure_captions)) {
   ttl <- figure_captions[[i]]$title
   sub <- figure_captions[[i]]$subtitle
   message(sprintf("[%02d] %s%s", i,
-                  if (is.null(ttl)) "(no title)" else ttl,
-                  if (is.null(sub)) "" else paste0(" -- ", gsub("\n", " ", sub))))
+                   if (is.null(ttl)) "(no title)" else ttl,
+                   if (is.null(sub)) "" else paste0(" -- ", gsub("\n", " ", sub))))
 }
 
 # The real contig ID behind every vOTU_### label used on every figure
@@ -4311,5 +5460,152 @@ for (i in seq_along(figure_captions)) {
 # its actual contig/assembly, and worth double-checking here that the
 # count matches the 151-vOTU catalogue size.
 message(sprintf("=== vOTU display-ID lookup (%d vOTUs) - see votu_display_lookup in the R environment for the full table ===",
-                nrow(votu_display_lookup)))
+                 nrow(votu_display_lookup)))
 print(votu_display_lookup, n = Inf)
+
+
+# #############################################################################
+# PART 12: EXPORT ALL RESULTS TABLES TO ONE WORKBOOK (added 2026-10-19)
+# #############################################################################
+# One sheet per table cited in results-by-aim.md, written complete (the
+# console prints truncate long tables), plus an Index sheet saying which
+# results section each sheet belongs to. Objects that do not exist in the
+# session are listed as "missing" on the Index rather than stopping the run.
+# Output: BASE/results/results_tables.xlsx (writexl or openxlsx if installed,
+# otherwise one CSV per table in BASE/results/results_tables_csv/).
+
+results_table_manifest <- tibble::tribble(
+  ~sheet,                    ~object,                           ~section,                       ~description,
+  "A3_detection_split",      "__detection_split",               "Aim A 3",                      "Core / intermediate / transient counts, viral vs bacterial (taxon-participant combinations)",
+  "A4_ks_by_participant",    "ks_by_participant",               "Aim A 4",                      "KS test, viral vs bacterial detection-frequency distributions",
+  "A2_kendall_trends",       "diversity_trend_tests",           "Aim A 2",                      "Kendall trend tests, BH over 12 tests (Part 2.6)",
+  "A5_votu_most_variable",   "candidate_votus",                 "Aim A 5",                      "Most variable vOTUs per participant (CV)",
+  "A5_votu_least_variable",  "candidate_votus_stable",          "Aim A 5",                      "Least variable vOTUs per participant (CV)",
+  "A5_genus_most_variable",  "candidate_genera",                "Aim A 5",                      "Most variable bacterial genera",
+  "A5_genus_least_variable", "candidate_genera_stable",         "Aim A 5",                      "Least variable bacterial genera",
+  "A5_species_most_var",     "candidate_species",               "Aim A 5",                      "Most variable bacterial species",
+  "A5_species_least_var",    "candidate_species_stable",        "Aim A 5",                      "Least variable bacterial species",
+  "A6_top_genera",           "top_abundant_genera",             "Aim A 6",                      "Most abundant bacterial genera per participant",
+  "A6_top_species",          "top_species_table",               "Aim A 6",                      "Top 10 bacterial species per participant (mean reads, mean relative abundance, detection)",
+  "A6_top_votus",            "top_abundant_votus",              "Aim A 6",                      "Most abundant vOTUs per participant",
+  "A6_top_votus_10",         "top_votu_table",                  "Aim A 6",                      "Top 10 vOTUs per participant (mean coverage, mean relative abundance, detection, classification, lifestyle, predicted host)",
+  "A6_detected_counts",        "detected_per_participant",        "Aim A 6",                      "Distinct bacterial species vs vOTUs detected, per participant and overall",
+  "A6_shared_counts",          "shared_summary",                  "Aim A 6",                      "Number of species / vOTUs found in 1, 2 or 3 participants",
+  "A6_thinning_check",         "thinning_check",                  "Aim A 6",                      "Bacterial overlap after thinning to vOTU-sized lists vs observed viral overlap",
+  "A7_distance_trajectory",  "resilience_trajectory",           "Aim A 7 / Aim C 5-6",          "Aitchison distance from baseline, every sample, both domains",
+  "B6_func_consecutive",      "func_consecutive",                "Aim B 6",                      "Functional-profile Aitchison distance between consecutive samples",
+  "B6_func_consec_summary",   "func_consecutive_summary",        "Aim B 6",                      "Functional-profile consecutive-sample distance: median/range per participant",
+  "B6_func_within_between",   "func_within_between",             "Aim B 6",                      "Functional-profile Aitchison distance within vs between participants (descriptive)",
+  "B6_func_permanova",        "func_permanova_between",          "Aim B 6",                      "PERMANOVA + PERMDISP on functional profile by participant (overall and pairwise, BH across 3 pairs)",
+  "B6_func_category_tests",   "func_category_tests",             "Aim B 6",                      "Per-category proportion across participants: Kruskal-Wallis, BH across categories (exploratory)",
+  "B6_func_mean_profile",     "func_mean_profile",               "Aim B 6",                      "Mean functional-category proportion per participant",
+  "B6_func_prepost_permanova","func_permanova_prepost",          "Aim B 6",                      "PERMANOVA + PERMDISP on functional profile, pre vs post per participant (L1 antibiotic, D3/G2 reference), BH across 3",
+  "A10_permanova_participant","permanova_participant",         "Aim A 10",                     "PERMANOVA + PERMDISP: samples grouped by participant (Aitchison), viral and bacterial",
+  "C10_permanova_prepost",   "permanova_prepost",               "Aim C 10",                     "PERMANOVA + PERMDISP: pre vs post per participant (L1 antibiotic, D3/G2 reference), BH across 6",
+  "A9_within_between",       "within_between_summary",          "Aim A 9",                      "Within- vs between-person Aitchison distance",
+  "A9_within_between_ratio", "within_between_ratio",            "Aim A 9",                      "Between:within ratio",
+  "A10_turnover",            "consecutive_turnover",            "Aim A 10",                     "Consecutive-sample Jaccard dissimilarity, every transition",
+  "A10_turnover_tests",      "turnover_domain_test",            "Aim A 10",                     "Paired Wilcoxon viral vs bacterial turnover, BH over 3",
+  "A11_depth_correlations",  "depth_correlations",              "Aim A 11",                     "Richness vs sequencing depth, Spearman",
+  "A11_depth_prepost",       "depth_prepost",                   "Depth follow-up",              "Sequencing depth pre vs post",
+  "A11_dist_vs_depth",       "dist_depth_summary",              "Depth follow-up",              "Distance from baseline vs depth; raw and depth-adjusted pre/post difference",
+  "A11_rarefaction",         "rarefied_summary",                "Depth follow-up",              "Bacterial distance, unrarefied vs rarefied",
+  "A11_richness_versions",   "richness_depth_tests",            "Depth follow-up",              "Richness trend and pre/post tests, raw vs depth-adjusted vs rarefied",
+  "B3_lifestyle_x_function", "__lifestyle_function_counts",     "Aim B 3",                      "vOTU counts, function x lifestyle",
+  "B3_fisher_tests",         "lifestyle_function_fisher",       "Aim B 3",                      "Per-function Fisher tests, temperate vs virulent, BH over 9",
+  "B4_amg_window_tests",     "amg_window_tests",                "Aim B 4",                      "AMG-category vOTU abundance, pre vs post Wilcoxon",
+  "B5_volatile_functions",   "candidate_votu_functions",        "Aim B 5",                      "Functions carried by the most variable vOTUs",
+  "C1_cooccurrence_edges",   "cooccurrence_filtered",           "Aim C 1",                      "All co-occurrence edges (>=3 shared samples), reliability tier",
+  "C2_pair_correlations",    "pair_correlations",               "Aim C 2",                      "Phage vs predicted-host correlation, detected pairs",
+  "C2_l1_pair_windows",      "l1_pair_window",                  "Aim C 2",                      "L1 phage-host correlation, pre vs post window",
+  "C4_network_summary",      "network_summary",                 "Aim C 4",                      "L1 network, pre vs post, min_shared 2",
+  "C4_network_turnover",     "network_turnover",                "Aim C 4",                      "L1 edge-set Jaccard (all edges)",
+  "C4_network_strict",       "network_summary_strict",          "Aim C 4",                      "L1 network, min_shared 3",
+  "C4_network_sharednodes",  "network_turnover_reference",      "Aim C 4",                      "Shared-node Jaccard with D3/G2 reference",
+  "C5_noise_vs_shift",       "l1_noise_vs_shift",               "Aim C 5",                      "L1 mean distance pre vs post",
+  "C6_resilience_L1",        "l1_resilience_check",             "Aim C 6",                      "L1 peak vs last distance",
+  "C6_resilience_ref",       "reference_drift_check",           "Aim C 6",                      "D3/G2 peak vs last distance",
+  "C7_window_tests",         "diversity_abundance_window_tests","Aim C 7",                      "Richness, Shannon, total abundance pre vs post Wilcoxon (18 tests)",
+  "C8_species_ranked",       "l1_species_ranked",               "Aim C 8",                      "L1 species, change in CLR post vs pre, ranked",
+  "C8_species_response",     "species_response",                "Aim C 8",                      "L1/D3/G2 species response (all tested species)",
+  "C8_genus_ranked",         "l1_genus_ranked",                 "Aim C 8",                      "L1 genera, change in CLR post vs pre, ranked",
+  "C8_genus_response",       "genus_response",                  "Aim C 8",                      "L1/D3/G2 genus response (all tested genera)",
+  "C8_vanished",             "l1_species_vanished",             "Aim C 8",                      "L1 species detected pre and not post",
+  "C8_emerged",              "l1_species_emerged",              "Aim C 8",                      "L1 species detected post and not pre",
+  "C8_vanish_emerge_ref",    "vanish_emerge_comparison",        "Aim C 8",                      "Vanished/emerged counts, L1 vs D3/G2",
+  "C9_temperate_by_sample",  "lifestyle_by_sample",             "Aim C 9",                      "Temperate share per sample",
+  "C9_temperate_tests",      "temperate_window_tests",          "Aim C 9",                      "Temperate share pre vs post Wilcoxon",
+  "C10_host_per_votu",       "host_breakdown_votu",             "Aim C 10",                     "Host prediction per vOTU",
+  "C10_host_genera",         "host_genus_table",                "Aim C 10",                     "Predicted host genera and Bracken presence",
+  "C10_host_family_only",    "host_higher_rank_table",          "Aim C 10",                     "Host predictions resolved to family/order only",
+  "S_votu_lookup",           "votu_display_lookup",             "Reference",                    "vOTU_### label to real contig ID",
+  "S_confidence_tiers",      "confidence_tiers",                "Reference",                    "vOTU confidence tiers (T1-T5)"
+)
+
+# Derived tables that are only printed (not stored) elsewhere in the script.
+.detection_split <- detection_freq_combined |>
+  mutate(category = case_when(
+    detection_freq <= 0.2 ~ "transient (<=20% of samples)",
+    detection_freq >= 0.8 ~ "core (>=80% of samples)",
+    TRUE ~ "intermediate")) |>
+  count(domain, category, name = "n") |>
+  group_by(domain) |>
+  mutate(pct = round(100 * n / sum(n), 1)) |>
+  ungroup()
+
+.lifestyle_function_counts <- as.data.frame.matrix(lifestyle_function_table) |>
+  tibble::rownames_to_column("function")
+
+export_get <- function(obj) {
+  if (obj == "__detection_split") return(.detection_split)
+  if (obj == "__lifestyle_function_counts") return(.lifestyle_function_counts)
+  if (exists(obj, inherits = TRUE)) get(obj, inherits = TRUE) else NULL
+}
+
+export_tables <- list()
+index_rows <- list()
+for (i in seq_len(nrow(results_table_manifest))) {
+  m <- results_table_manifest[i, ]
+  x <- export_get(m$object)
+  ok <- !is.null(x) && (is.data.frame(x) || is.matrix(x))
+  if (ok) {
+    x <- as.data.frame(dplyr::ungroup(as_tibble(x)))
+    # list-columns cannot be written to a sheet: collapse them
+    for (cn in names(x)) if (is.list(x[[cn]])) x[[cn]] <- vapply(x[[cn]], function(v) paste(format(v), collapse = "; "), character(1))
+    export_tables[[m$sheet]] <- x
+  }
+  index_rows[[i]] <- tibble(sheet = m$sheet, object = m$object, section = m$section,
+                            description = m$description,
+                            n_rows = if (ok) nrow(x) else NA_integer_,
+                            status = if (ok) "written" else "MISSING in this session")
+}
+export_index <- bind_rows(index_rows)
+export_tables <- c(list(Index = as.data.frame(export_index)), export_tables)
+
+RESULTS_XLSX <- file.path(BASE, "results", "results_tables.xlsx")
+if (requireNamespace("writexl", quietly = TRUE)) {
+  writexl::write_xlsx(export_tables, RESULTS_XLSX)
+  message(sprintf("=== Wrote %d tables to %s ===", length(export_tables) - 1, RESULTS_XLSX))
+} else if (requireNamespace("openxlsx", quietly = TRUE)) {
+  openxlsx::write.xlsx(export_tables, RESULTS_XLSX)
+  message(sprintf("=== Wrote %d tables to %s ===", length(export_tables) - 1, RESULTS_XLSX))
+} else {
+  csv_dir <- file.path(BASE, "results", "results_tables_csv")
+  dir.create(csv_dir, showWarnings = FALSE, recursive = TRUE)
+  # One locked file (e.g. a CSV still open in Excel) must not abort the rest of the export.
+  failed_csv <- character(0)
+  for (nm in names(export_tables)) {
+    ok <- tryCatch({ readr::write_csv(export_tables[[nm]], file.path(csv_dir, paste0(nm, ".csv"))); TRUE },
+                   error = function(e) FALSE)
+    if (!ok) failed_csv <- c(failed_csv, nm)
+  }
+  if (length(failed_csv) > 0)
+    message("NOT WRITTEN (file open in Excel/OneDrive lock? close it and rerun Part 12): ",
+            paste(failed_csv, collapse = ", "))
+  message(sprintf("=== writexl/openxlsx not installed (install.packages('writexl')); wrote %d CSV files to %s ===",
+                  length(export_tables), csv_dir))
+}
+if (any(export_index$status != "written")) {
+  message("Tables not found in this session:")
+  print(export_index |> filter(status != "written") |> select(sheet, object), n = Inf)
+}
