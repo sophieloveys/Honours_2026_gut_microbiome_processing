@@ -1,0 +1,39 @@
+# config.yaml  -- RECONSTRUCTED 2026-11-10 from the Snakefile's parameter names and the values in the
+# Methods draft, because the original file was lost in the Setonix storage purge.
+# Every line marked CHECK is a value I could not confirm from your notes: fill it from your
+# memory, your SLURM logs (slurm_logs/), or `sacct`, and delete the CHECK tag once confirmed.
+# The Snakefile loads this with:  configfile: "config.yaml"
+
+# ---- paths ----
+sample_sheet:   "sample_sheet.csv"
+base_dir:       "/scratch/pawsey1018/sloveys/virome_pipeline"
+raw_reads_dir:  "/scratch/pawsey1018/sloveys/raw_reads"      # CHECK: one {sample}.fastq.gz per sample
+results_dir:    "/scratch/pawsey1018/sloveys/virome_pipeline/results"
+container_dir:  "/scratch/pawsey1018/sloveys/containers"     # CHECK: Snakefile expects <tool>.sif files; scratch holds *_sandbox folders
+
+# ---- reference databases ----
+databases:
+  kraken2_db:    "/data/references/kraken2/pluspfp_20230605"                       # PlusPFP, build 2023-06-05
+  hostile_ref:   "human-t2t-hla"                                                   # CHECK: index name vs path
+  genomad_db:    "/scratch/pawsey1018/sloveys/databases/genomad"                   # CHECK: genomad or genomad2; inner folder name
+  checkv_db:     "/scratch/pawsey1018/sloveys/databases/checkv_new"                # CHECK: inner folder (e.g. checkv-db-v1.5)
+  vibrant_db:    "/scratch/pawsey1018/sloveys/databases/vibrant"                   # CHECK
+  vibrant_files: "/scratch/pawsey1018/sloveys/databases/vibrant"                   # CHECK: VIBRANT -m files directory
+  phold_db:      "/scratch/pawsey1018/sloveys/databases/phold_new"                 # CHECK: phold or phold_new
+  phabox_db:     "/scratch/pawsey1018/sloveys/databases/phabox"                    # CHECK: phabox_db_v2 folder
+
+# ---- tool parameters (values confirmed in the Methods draft unless marked CHECK) ----
+nanoplot:   {threads: 4}                              # CHECK
+chopper:    {min_quality: 10, min_length: 500, threads: 8}   # Q10, 500 bp; CHECK threads
+hostile:    {threads: 8}                              # CHECK
+kraken2:    {confidence: 0.1, threads: 32}            # confidence 0.1; CHECK threads
+bracken:    {level: "S", read_length: 150}            # read length 150; see Methods note on long reads
+metaflye:   {min_overlap: 1000, threads: 32}          # --meta --nano-raw in the rule; CHECK threads
+vibrant:    {threads: 16}                             # CHECK
+genomad:    {min_score: 0.7, splits: 8, threads: 16}  # min score 0.7; CHECK splits and threads
+checkv:     {min_completeness: 50, min_length: 5000, threads: 16}  # >=50% complete, >=5 kb; CHECK threads
+cd_hit:     {ani: 0.95, coverage: 0.85, memory: 64000, threads: 16} # 95% identity, 85% coverage; memory in MB, CHECK
+minimap2:   {preset: "map-ont", threads: 16}          # CHECK threads
+coverm:     {min_covered_fraction: 0.75, trim_min: 0.05, trim_max: 0.95, threads: 16}  # trimmed mean 5-95%; CHECK threads
+phold:      {threads: 16}                             # CHECK
+phabox:     {threads: 16}                             # CHECK
