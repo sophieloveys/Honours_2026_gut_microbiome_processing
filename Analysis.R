@@ -840,6 +840,7 @@ print.deferred_fig <- function(x, ...) invisible(x)
 # Topic groups, in the order they are exported. First matching rule wins.
 FIGURE_GROUPS <- tibble::tribble(
   ~group,                                         ~pattern,
+  "14 crAss-like phages (exploratory)",           "^crAss",
   "01 Alpha diversity & sequencing depth",        "^Viral \\(vOTU\\) (Shannon|richness)|^Total normalized viral abundance|^Bacterial Shannon|^Viral vs bacterial Shannon|^Richness vs sequencing depth|^Sequencing depth over time|^Bacterial richness over time|^Total bacterial reads",
   "02 Detection frequency, persistence & turnover","^Detection frequency|^vOTU assembly|^Turnover between",
   "03 Beta diversity (Aitchison) & ordination",   "^Community distance from baseline|ordination|^Within-person",
@@ -5429,6 +5430,172 @@ for (cs in combined_sets) {
 
 
 # -----------------------------------------------------------------------
+# 11.10. crAss-LIKE PHAGES (added 2026-11-10) - EXPLORATORY, POST HOC
+#        Aim C 3.4 item 3 (L1 perturbation) + one sentence in Aim A 3.2.1.
+#        Taxonomy- and read-based only: no sequence confirmation (the vOTU FASTA
+#        was lost in the Setonix scratch purge). Seed sentences and CHECKs are in
+#        claude/results-crassphage-seed.md.
+#        (a) which vOTUs PhaBOX2 classed as Crassvirales, (b) their detection and
+#        abundance, (c) a read-level cross-check from the raw Bracken output (these
+#        taxa were removed from the bacterial table in 1.2a as phage), (d) L1 pre vs
+#        post share, (e) one summary figure (D3 and L1; G2 has at most 0.012%).
+# -----------------------------------------------------------------------
+# Crassvirales families as named by ICTV (2023+); "crass" also covers the order name.
+crass_pattern <- "crass|Carjivirus|Intestiviridae|Crevaviridae|Suoliviridae|Steigviridae"
+# Genera found in the vOTU catalogue plus the generic names, so Bracken species such as
+# "Endlipuvirus intestinihominis" are caught (the pattern above would miss them).
+crass_bracken_pattern <- paste0(crass_pattern,
+  "|Endlipuvirus|Fohxhuevirus|Junduvirus|Kingevirus|Dabirmavirus|crAssphage")
+
+# ---- (a) crAss-like vOTUs by PhaBOX2 taxonomy ----
+crass_votus <- viral_long |>
+  filter(str_detect(coalesce(Lineage, ""), regex(crass_pattern, ignore_case = TRUE)) |
+         str_detect(coalesce(Genus, ""),   regex(crass_pattern, ignore_case = TRUE))) |>
+  distinct(votu_display, contig, Lineage, Genus, Host, TYPE) |>
+  arrange(votu_display)
+
+message("=== crAss-like vOTUs by PhaBOX2 taxonomy: ", nrow(crass_votus), " of ",
+        n_distinct(viral_long$contig), " ===")
+print(as.data.frame(crass_votus), row.names = FALSE)
+
+# Rank of the deepest classification, crAss-like vs not (Aim A 3.2.1: all 13 species-level vOTUs are crAss-like)
+crass_rank_counts <- viral_long |> distinct(contig, Lineage) |>
+  mutate(rank = case_when(str_detect(coalesce(Lineage, ""), "species:") ~ "species",
+                          str_detect(coalesce(Lineage, ""), "genus:")   ~ "genus",
+                          TRUE ~ "higher"),
+         crass = str_detect(coalesce(Lineage, ""), regex(crass_pattern, ignore_case = TRUE))) |>
+  count(rank, crass)
+message("=== Deepest classification rank, crAss-like (TRUE) vs other (FALSE) ===")
+print(as.data.frame(crass_rank_counts), row.names = FALSE)
+
+# Context only: Bacteroidales-hosted vOTUs (crAss-like phages infect Bacteroidales; PhaBOX2 host calls
+# for the crAss-like vOTUs themselves are unreliable and are NOT interpreted).
+crass_bacteroidales_votus <- viral_long |>
+  filter(str_detect(coalesce(Host, ""), "Bacteroides|Phocaeicola|Prevotella|Parabacteroides")) |>
+  distinct(votu_display, contig, Lineage, Host, TYPE) |> arrange(votu_display)
+message("=== (context) vOTUs with a predicted Bacteroidales host: ", nrow(crass_bacteroidales_votus),
+        " - not all are crAss-like ===")
+
+# ---- (b) Detection and abundance of the crAss-like vOTUs ----
+crass_detection <- viral_long |>
+  semi_join(crass_votus, by = "contig") |>
+  select(votu_display, participant, sample_id, timepoint, collection_date, abundance)
+
+message("=== crAss-like vOTU detection per participant (samples detected / samples) ===")
+print(as.data.frame(crass_detection |>
+        group_by(votu_display, participant) |>
+        summarise(samples_detected = sum(abundance > 0), samples = n(),
+                  mean_abundance = signif(mean(abundance), 3), .groups = "drop")),
+      row.names = FALSE)
+
+if (nrow(crass_detection) > 0) {
+  p_crass_votus <- ggplot(crass_detection, aes(x = collection_date, y = abundance, colour = votu_display)) +
+    geom_line() +
+    geom_point(size = 2) +
+    antibiotic_marker_date() +
+    facet_wrap(~ participant, scales = "free_x") +
+    participant_date_scales() +
+    labs(title = "crAss-like vOTUs over time (PhaBOX2 Crassvirales classification)",
+         x = "Collection date", y = "Abundance (CoverM trimmed mean, GMPR-normalised)", colour = NULL) +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom")
+  print(style_figure(p_crass_votus, width = 10, height = 5))
+}
+
+# ---- (c) Read-level cross-check from the raw Bracken output ----
+# Raw Bracken files name the taxon column "name" (1.2 renames it to bacterial_taxon on the filtered table).
+crass_bracken_reads <- purrr::map_dfr(bracken_files, function(path) {
+  sid <- str_remove(basename(path), "_bracken\\.tsv$")
+  d <- read_tsv(path, show_col_types = FALSE) |>
+    mutate(sample_id = sid, total_reads = sum(new_est_reads))
+  d |> filter(str_detect(name, regex(crass_bracken_pattern, ignore_case = TRUE))) |>
+    transmute(sample_id, taxon = name, reads = new_est_reads,
+              percent_of_all_assigned = 100 * new_est_reads / total_reads)
+}) |>
+  left_join(sample_meta |> select(sample_id, participant, timepoint, collection_date), by = "sample_id") |>
+  arrange(participant, timepoint)
+
+message("=== crAss-like taxa in raw Bracken output (removed from the bacterial table as phage): ",
+        n_distinct(crass_bracken_reads$taxon), " taxa, ", nrow(crass_bracken_reads), " sample hits, ",
+        n_distinct(crass_bracken_reads$sample_id), " samples ===")
+print(as.data.frame(crass_bracken_reads |> mutate(percent_of_all_assigned = signif(percent_of_all_assigned, 3))),
+      row.names = FALSE)
+
+if (nrow(crass_bracken_reads) > 0) {
+  p_crass_reads <- ggplot(crass_bracken_reads,
+                          aes(x = collection_date, y = percent_of_all_assigned, colour = taxon)) +
+    geom_line() +
+    geom_point(size = 2) +
+    antibiotic_marker_date() +
+    facet_wrap(~ participant, scales = "free_x") +
+    participant_date_scales() +
+    labs(title = "crAssphage-like reads over time (Kraken2/Bracken, share of all assigned reads)",
+         x = "Collection date", y = "% of Bracken-assigned reads", colour = NULL) +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom")
+  print(style_figure(p_crass_reads, width = 10, height = 5))
+}
+
+# ---- (d) Total crAss-like share per sample, and L1 pre vs post the antibiotic (descriptive, not tested) ----
+crass_sample_share <- crass_bracken_reads |>
+  group_by(sample_id, participant, timepoint, collection_date) |>
+  summarise(reads = sum(reads), pct = sum(percent_of_all_assigned), .groups = "drop") |>
+  arrange(participant, timepoint)
+message("=== crAss-like share of Bracken-assigned reads per sample (denominator: all Bracken-assigned reads in the raw file) ===")
+print(as.data.frame(crass_sample_share |> mutate(pct = signif(pct, 3))), row.names = FALSE)
+
+# L1: timepoints 1-4 are before the tetracycline course, 5-9 after. Few samples and one participant: describe only.
+crass_l1_prepost <- crass_sample_share |>
+  filter(participant == "L1") |>
+  mutate(window = if_else(timepoint <= 4, "pre (L1.1-L1.4)", "post (L1.5-L1.9)")) |>
+  group_by(window) |>
+  summarise(n_samples = n(), mean_pct = mean(pct), min_pct = min(pct), max_pct = max(pct),
+            total_reads = sum(reads), .groups = "drop")
+message("=== L1 crAss-like share, pre vs post tetracycline (descriptive; baseline already varies widely) ===")
+print(as.data.frame(crass_l1_prepost |> mutate(across(where(is.numeric), ~ signif(.x, 3)))), row.names = FALSE)
+
+# ---- (e) Summary figure: share of Bracken-assigned reads per sample, stacked by genus (D3 and L1) ----
+# G2 is left out: at most 0.012% of assigned reads (single reads in 3 samples), nothing to show.
+crass_genus_share <- crass_bracken_reads |>
+  filter(participant != "G2") |>
+  mutate(genus = word(taxon, 1)) |>
+  group_by(sample_id, participant, collection_date, genus) |>
+  summarise(share = sum(percent_of_all_assigned), .groups = "drop")
+
+if (nrow(crass_genus_share) > 0) {
+  crass_genus_order <- crass_genus_share |> group_by(genus) |> summarise(t = sum(share)) |>
+    arrange(desc(t)) |> pull(genus)
+  crass_genus_share <- crass_genus_share |> mutate(genus = factor(genus, levels = crass_genus_order))
+  crass_genus_cols <- setNames(c(ROYAL1, ROYAL2)[seq_along(crass_genus_order)], crass_genus_order)
+
+  # participant_date_scales() builds one x-scale per participant (D3, G2, L1) and ggh4x matches them to panels
+  # by position, so with G2 gone the L1 panel would get G2's ticks. Build the two scales here instead.
+  crass_date_scales <- ggh4x::facetted_pos_scales(
+    x = lapply(split(sample_dates$collection_date, sub("\\..*", "", sample_dates$sample_id))[c("D3", "L1")],
+               function(d) scale_x_date(breaks = sort(unique(d)), labels = thin_date_labels)))
+
+  CRASS_FREE_Y <- FALSE   # FALSE = shared y-axis (shows L1 >> D3); TRUE = each panel on its own scale
+
+  p_crass_share <- ggplot(crass_genus_share, aes(x = collection_date, y = share, fill = genus)) +
+    geom_col(width = 6, colour = "black", linewidth = 0.2) +
+    antibiotic_marker_date() +
+    facet_wrap(~ participant, scales = if (CRASS_FREE_Y) "free" else "free_x") +
+    crass_date_scales +
+    scale_fill_manual(values = crass_genus_cols) +
+    labs(title = "crAss-like phage reads over time (Crassvirales genera, Kraken2/Bracken)",
+         subtitle = "Share of all Bracken-assigned reads per sample, stacked by genus. Dashed line = L1 tetracycline course. G2 omitted (at most 0.012%). Exploratory, read-based; not sequence-confirmed.",
+         x = "Collection date", y = "% of Bracken-assigned reads", fill = "Genus") +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom")
+  print(style_figure(p_crass_share, width = 10, height = 5))
+}
+
+dir.create(file.path(BASE, "results"), showWarnings = FALSE)
+readr::write_csv(crass_votus, file.path(BASE, "results", "crass_votus.csv"))
+readr::write_csv(crass_detection, file.path(BASE, "results", "crass_detection.csv"))
+readr::write_csv(crass_bracken_reads, file.path(BASE, "results", "crass_bracken_reads.csv"))
+
+# -----------------------------------------------------------------------
 # Export + print every figure, grouped by topic (see FIGURE_GROUPS in Part 2)
 # -----------------------------------------------------------------------
 export_figures_in_order()
@@ -5538,6 +5705,12 @@ results_table_manifest <- tibble::tribble(
   "C10_host_per_votu",       "host_breakdown_votu",             "Aim C 10",                     "Host prediction per vOTU",
   "C10_host_genera",         "host_genus_table",                "Aim C 10",                     "Predicted host genera and Bracken presence",
   "C10_host_family_only",    "host_higher_rank_table",          "Aim C 10",                     "Host predictions resolved to family/order only",
+  "X_crass_votus",           "crass_votus",                     "Aim A 1 / Aim C 3 (exploratory)", "vOTUs classed as Crassvirales by PhaBOX2 (lineage, genus, host, lifestyle)",
+  "X_crass_ranks",           "crass_rank_counts",               "Aim A 1 (exploratory)",        "Deepest classification rank, crAss-like vs other vOTUs",
+  "X_crass_detection",       "crass_detection",                 "Aim C 3 (exploratory)",        "crAss-like vOTU abundance per sample",
+  "X_crass_bracken",         "crass_bracken_reads",             "Aim C 3 (exploratory)",        "crAss-like taxa in raw Bracken output, reads and % of assigned reads per sample",
+  "X_crass_sample_share",    "crass_sample_share",              "Aim C 3 (exploratory)",        "Total crAss-like share of Bracken-assigned reads per sample",
+  "X_crass_l1_prepost",      "crass_l1_prepost",                "Aim C 3 (exploratory)",        "L1 crAss-like share, pre vs post tetracycline (descriptive)",
   "S_votu_lookup",           "votu_display_lookup",             "Reference",                    "vOTU_### label to real contig ID",
   "S_confidence_tiers",      "confidence_tiers",                "Reference",                    "vOTU confidence tiers (T1-T5)"
 )
