@@ -1038,10 +1038,12 @@ ks_by_participant <- detection_freq_combined |>
       detection_freq[domain == "Bacterial"]
     )$p.value,
     .groups = "drop"
-  )
+  ) |>
+  mutate(ks_p_adj_BH = p.adjust(ks_p, method = "BH"))   # BH across the 3 participants
 print(ks_by_participant)
 
-ks_labels <- ks_by_participant |> mutate(label = paste0("KS p = ", fmt_p(ks_p)))
+ks_labels <- ks_by_participant |>
+  mutate(label = paste0("KS p = ", fmt_p(ks_p), "\nBH p = ", fmt_p(ks_p_adj_BH), " ", p_stars(ks_p_adj_BH)))
 
 # ECDF - best for comparing overall distribution shape/shift
 p_detection_freq_ecdf <- ggplot(detection_freq_combined, aes(x = detection_freq, colour = domain)) +
@@ -1051,7 +1053,7 @@ p_detection_freq_ecdf <- ggplot(detection_freq_combined, aes(x = detection_freq,
             hjust = -0.08, vjust = 1.6, size = 3) +
   scale_colour_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
   labs(title = "Detection frequency (read-mapping-based): viral vs bacterial",
-       subtitle = "Proportion of that participant's own samples each vOTU/taxon was detected in",
+       subtitle = "Proportion of that participant's own samples each vOTU/taxon was detected in. Two-sample KS test per participant, BH-adjusted across the 3 participants; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
        x = "Detection frequency", y = "Cumulative proportion", colour = NULL) +
   theme_thesis()
 
@@ -1067,6 +1069,7 @@ p_detection_freq_hist <- ggplot(detection_freq_combined, aes(x = detection_freq,
             hjust = -0.08, vjust = 1.6, size = 3) +
   scale_fill_manual(values = c("Viral" = COL_VIRAL, "Bacterial" = COL_BACTERIAL)) +
   labs(title = "Detection frequency distribution (density-normalized): viral vs bacterial",
+       subtitle = "Two-sample KS test per participant, BH-adjusted across the 3 participants; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
        x = "Detection frequency", y = "Density", fill = NULL) +
   theme_thesis()
 
@@ -1701,6 +1704,7 @@ for (p in unique(genus_line_data_stable$participant)) {
     labs(title = paste0("Least variable (most stable) bacterial genera over time - ", p),
          subtitle = "Bottom 8 genera by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
+    expand_limits(y = 0) +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(face = "bold.italic"))
@@ -1802,6 +1806,7 @@ for (p in unique(species_line_data_stable$participant)) {
     labs(title = paste0("Least variable (most stable) bacterial species over time - ", p),
          subtitle = "Bottom 8 species by coefficient of variation (zero-filled; detected in >=4 of this participant's own timepoints)",
          x = "Collection date", y = "Estimated reads (Bracken)") +
+    expand_limits(y = 0) +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           strip.text = element_text(size = 7, face = "bold.italic"))
@@ -1936,6 +1941,7 @@ for (p in unique(votu_line_data_stable$participant)) {
     labs(title = paste0("Least variable (most stable) vOTUs over time - ", p),
          subtitle = "Bottom 8 vOTUs by coefficient of variation (detected in >=4 of this participant's own timepoints, via read-mapping)",
          x = "Collection date", y = "CoverM trimmed-mean coverage") +
+    expand_limits(y = 0) +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
@@ -3347,7 +3353,8 @@ diversity_abundance_window_tests <- window_test_input |>
   group_by(participant, domain, metric) |>
   group_modify(~ window_wilcoxon_test(.x)) |>
   ungroup() |>
-  arrange(domain, metric, participant)
+  arrange(domain, metric, participant) |>
+  mutate(wilcoxon_p_adj_BH = p.adjust(wilcoxon_p, method = "BH"))   # BH across all testable tests (NA = not testable, excluded)
 
 message("=== Viral/bacterial diversity + total abundance, pre- vs post-antibiotic-window Wilcoxon test (L1 = real event; D3/G2 = structurally matched reference only) ===")
 print(diversity_abundance_window_tests, n = Inf)
@@ -3360,9 +3367,11 @@ message("CAVEAT: pre/post window sizes here are only 4-5 samples per participant
 # -----------------------------------------------------------------------
 # Every point is a sample; the bar is the median. Pre = timepoints 1-4, post = 5+.
 # L1 took tetracycline between its pre and post windows; D3 and G2 are unperturbed
-# and show the same split as a reference. p = unadjusted two-sided Wilcoxon rank-sum
-# (the 18 tests are not BH-adjusted; with 4 vs 4-6 samples the smallest attainable
-# p is about 0.014 to 0.029, so most will be non-significant).
+# and show the same split as a reference. Each panel shows the unadjusted two-sided
+# Wilcoxon rank-sum p and the BH-adjusted p (BH over all testable tests in
+# diversity_abundance_window_tests, i.e. both domains); stars are based on the BH p.
+# With 4 vs 4-6 samples the smallest attainable raw p is about 0.014 to 0.029, so after
+# BH adjustment very little can reach significance.
 
 make_prepost_plot <- function(dom) {
   metric_labels <- if (dom == "Viral")
@@ -3378,7 +3387,8 @@ make_prepost_plot <- function(dom) {
   lab <- diversity_abundance_window_tests |>
     filter(domain == dom) |>
     mutate(metric = factor(metric, levels = levels(d$metric)),
-           label = if_else(is.na(wilcoxon_p), "not testable", paste0("p = ", fmt_p(wilcoxon_p))))
+           label = if_else(is.na(wilcoxon_p), "not testable",
+                           paste0("p = ", fmt_p(wilcoxon_p), "\nBH p = ", fmt_p(wilcoxon_p_adj_BH), " ", p_stars(wilcoxon_p_adj_BH))))
 
   ggplot(d, aes(x = window, y = value)) +
     stat_summary(fun = median, fun.min = median, fun.max = median, geom = "crossbar",
@@ -3386,13 +3396,13 @@ make_prepost_plot <- function(dom) {
     geom_point(aes(fill = window), shape = 21, size = 2.6, colour = "black", stroke = 0.4,
                position = position_jitter(width = 0.1, height = 0, seed = 1)) +
     geom_text(data = lab, aes(x = 1.5, y = Inf, label = label), inherit.aes = FALSE,
-              vjust = 1.5, size = 3) +
+              vjust = 1.2, size = 2.8, lineheight = 0.95) +
     facet_grid(metric ~ participant, scales = "free_y",
                labeller = labeller(metric = metric_labels)) +
     scale_fill_manual(values = c(pre = ROYAL2[4], post = ROYAL1[2]), guide = "none") +
-    scale_y_continuous(expand = expansion(mult = c(0.05, 0.2)), labels = scales::comma) +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.35)), labels = scales::comma) +
     labs(title = sprintf("Pre vs post window: %s diversity and abundance, by participant", tolower(dom)),
-         subtitle = "Each point is a sample; bar = median. Pre = timepoints 1-4, post = timepoints 5 and later. L1 took tetracycline between the two windows; D3 and G2 are unperturbed references. p = unadjusted two-sided Wilcoxon rank-sum test (4 vs 4-6 samples per window).",
+         subtitle = "Each point is a sample; bar = median. Pre = timepoints 1-4, post = timepoints 5 and later. L1 took tetracycline between the two windows; D3 and G2 are unperturbed references. Two-sided Wilcoxon rank-sum test per panel (4 vs 4-6 samples per window); p = unadjusted, BH p = Benjamini-Hochberg across all testable panels in the table; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
          x = NULL, y = NULL) +
     theme_thesis() +
     theme(strip.text.y = element_text(angle = 0, hjust = 0))
@@ -4341,14 +4351,15 @@ print(style_figure(p_func_within_between, width = 7, height = 5))
 p_func_by_participant <- ggplot(func_mean_profile,
                                 aes(x = participant, y = mean_proportion, fill = `function`)) +
   geom_col(position = "fill", colour = "black", linewidth = 0.2) +
-  scale_fill_wes_d() +
   labs(title = "Functional category profile by participant (mean proportion of abundance)",
        subtitle = "Mean across each participant's samples of the abundance-weighted functional-category proportions (unknown function excluded).",
        x = NULL, y = "Mean proportion of abundance", fill = NULL) +
+  guides(fill = guide_legend(ncol = 2, byrow = TRUE)) +
+  scale_fill_wes_d(labels = function(x) stringr::str_wrap(x, 32)) +
   theme_thesis() +
   theme(legend.position = "bottom")
 
-print(style_figure(p_func_by_participant, width = 7, height = 6))
+print(style_figure(p_func_by_participant, width = 7, height = 6.5))
 
 # ---- (3) Pre vs post antibiotic course (L1), D3/G2 as reference ----
 func_permanova_prepost <- purrr::map_dfr(all_participants, function(part) {
@@ -5626,7 +5637,7 @@ if (nrow(crass_detection) > 0) {
     facet_wrap(~ participant, scales = "free_x") +
     participant_date_scales() +
     labs(title = "crAss-like vOTUs over time (PhaBOX2 Crassvirales classification)",
-         x = "Collection date", y = "Abundance (CoverM trimmed mean, GMPR-normalised)", colour = NULL) +
+         x = "Collection date", y = "Abundance (CoverM trimmed mean,\nGMPR-normalised)", colour = NULL) +
     theme_thesis() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom")
   print(style_figure(p_crass_votus, width = 10, height = 5))
@@ -6003,6 +6014,7 @@ p_turnover_days <- ggplot(turnover_days_data, aes(x = days_between, y = jaccard_
   scale_colour_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
   scale_fill_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
   scale_y_continuous(limits = c(0, 1.2), breaks = seq(0, 1, 0.25)) +
+  scale_x_continuous(breaks = function(l) unique(round(scales::extended_breaks()(l)))) +
   labs(title = "Turnover between consecutive samples vs days between visits",
        subtitle = sprintf("Jaccard dissimilarity of detected membership against the gap between the two visits. Spearman correlation per domain; BH-adjusted across %d tests; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant. Straight lines are descriptive least-squares fits.",
                           nrow(turnover_vs_days)),
@@ -6100,6 +6112,7 @@ if (nrow(robust_plot) > 0) {
     facet_grid(contrast ~ domain, scales = "free_y") +
     scale_colour_manual(values = c(Viral = COL_VIRAL, Bacterial = COL_BACTERIAL), guide = "none") +
     scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+    scale_x_discrete(labels = function(x) stringr::str_wrap(x, 16)) +
     labs(title = "Robustness: PERMANOVA R2 under different zero-handling and distance choices",
          subtitle = "R2 from adonis2 (9,999 permutations). Labels = BH-adjusted p across the five metrics within each panel; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant; † = PERMDISP p < 0.05 (unequal spread). L1 pre vs post: p-value floor about 0.008.",
          x = NULL, y = "R2 (share of distance variation explained)") +
