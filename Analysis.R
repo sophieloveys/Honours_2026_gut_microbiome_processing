@@ -841,6 +841,7 @@ print.deferred_fig <- function(x, ...) invisible(x)
 FIGURE_GROUPS <- tibble::tribble(
   ~group,                                         ~pattern,
   "14 crAss-like phages (exploratory)",           "^crAss",
+  "15 Robustness checks (exploratory)",            "^Robustness:",
   "01 Alpha diversity & sequencing depth",        "^Viral \\(vOTU\\) (Shannon|richness)|^Total normalized viral abundance|^Bacterial Shannon|^Viral vs bacterial Shannon|^Richness vs sequencing depth|^Sequencing depth over time|^Bacterial richness over time|^Total bacterial reads",
   "02 Detection frequency, persistence & turnover","^Detection frequency|^vOTU assembly|^Turnover between",
   "03 Beta diversity (Aitchison) & ordination",   "^Community distance from baseline|ordination|^Within-person",
@@ -4778,6 +4779,135 @@ vanish_emerge_summary <- function(resp, taxon_col, level) {
 }
 
 # -----------------------------------------------------------------------
+# 11.4C. DETECTION-THRESHOLD SWEEP ON THE BACTERIAL SIDE (added 2026-11-11)
+# -----------------------------------------------------------------------
+# Why: a vOTU counts as detected only if >= 75% of its genome is covered (CoverM), which is a far
+# stricter rule than a bacterial species counting as detected with a single Bracken read. Two Aim A
+# results could partly reflect that difference in detection rules (and the depth dependence behind it):
+#   (1) viral vs bacterial detection-frequency distributions (core fraction, KS test; 2.3B / 1.4),
+#   (2) viral vs bacterial consecutive-sample turnover (11.3).
+# Here the bacterial detection rule is made stricter in steps and both comparisons are recomputed:
+#   "min reads"              detected if Bracken new_est_reads >= threshold (0 = the current rule, > 0)
+#   "min relative abundance" detected if the species' share of that sample's Bracken reads >= threshold
+#                            (a depth-fair version: the same cut-off means the same share in every sample)
+# The viral side is NOT changed (viral_freq and the viral turnover from 11.3 are reused as they are).
+# Reading it: if the viral-bacterial gaps persist as the bacterial rule gets stricter, they are not just a
+# detection-rule difference; if they close at thresholds that are still plausible, say so in Limitations.
+# This does NOT make the two domains equivalent (a read threshold is not a genome-coverage threshold) and
+# it cannot remove the depth dependence of the viral catalogue itself. Exploratory.
+
+thr_bact <- bacterial_long |>
+  group_by(sample_id) |>
+  mutate(rel_abund = new_est_reads / sum(new_est_reads)) |>
+  ungroup() |>
+  select(participant, sample_id, bacterial_taxon, new_est_reads, rel_abund)
+
+thr_grid <- bind_rows(
+  tibble(metric = "min reads",              threshold = c(0, 5, 10, 20, 50, 100, 200)),
+  tibble(metric = "min relative abundance", threshold = c(0, 1e-5, 1e-4, 1e-3)))
+
+thr_viral_turn <- consecutive_turnover |> filter(domain == "viral") |>
+  select(participant, from_sample, viral = jaccard_dissimilarity)
+thr_viral_df <- viral_freq |> select(participant, detection_freq)
+thr_cat <- function(x) c(core = mean(x >= 0.8) * 100, transient = mean(x <= 0.2) * 100)
+
+thr_one <- function(metric, threshold) {
+  val <- if (metric == "min reads") thr_bact$new_est_reads else thr_bact$rel_abund
+  d <- thr_bact[if (threshold == 0) val > 0 else val >= threshold, ]
+
+  bf <- d |> group_by(participant, bacterial_taxon) |>
+    summarise(n_det = n_distinct(sample_id), .groups = "drop") |>
+    left_join(participant_n_samples, by = "participant") |>
+    mutate(detection_freq = n_det / total_samples)
+
+  # detection-frequency comparison: pooled ("all") and per participant
+  df_rows <- purrr::map_dfr(c("all", all_participants), function(p) {
+    b <- if (p == "all") bf$detection_freq else bf$detection_freq[bf$participant == p]
+    v <- if (p == "all") thr_viral_df$detection_freq else thr_viral_df$detection_freq[thr_viral_df$participant == p]
+    ks <- suppressWarnings(ks.test(v, b))
+    tibble(participant = p, n_bacterial_taxa = length(b), n_vOTUs = length(v),
+           bact_core_pct = thr_cat(b)[["core"]], viral_core_pct = thr_cat(v)[["core"]],
+           bact_transient_pct = thr_cat(b)[["transient"]], viral_transient_pct = thr_cat(v)[["transient"]],
+           ks_D = unname(ks$statistic), ks_p = ks$p.value)
+  })
+
+  # turnover comparison per participant (bacterial Jaccard on the thresholded presence sets)
+  sets_all <- split(d$bacterial_taxon, d$sample_id)
+  tn_rows <- purrr::map_dfr(all_participants, function(part) {
+    meta <- sample_meta |> filter(participant == part) |> arrange(timepoint)
+    bact <- vapply(seq_len(nrow(meta) - 1), function(i) {
+      a <- sets_all[[meta$sample_id[i]]]; b <- sets_all[[meta$sample_id[i + 1]]]
+      if (is.null(a)) a <- character(0); if (is.null(b)) b <- character(0)
+      u <- length(union(a, b)); if (u == 0) NA_real_ else 1 - length(intersect(a, b)) / u
+    }, numeric(1))
+    tv <- thr_viral_turn |> filter(participant == part) |> arrange(match(from_sample, meta$sample_id))
+    ok <- !is.na(bact) & !is.na(tv$viral)
+    tibble(participant = part, n_transitions = sum(ok),
+           median_bact_turnover = median(bact[ok]), median_viral_turnover = median(tv$viral[ok]),
+           n_bact_ge_viral = sum(bact[ok] >= tv$viral[ok]),
+           wilcoxon_p = suppressWarnings(tryCatch(wilcox.test(tv$viral[ok], bact[ok], paired = TRUE)$p.value,
+                                                  error = function(e) NA_real_)))
+  })
+  list(df = df_rows |> mutate(metric = metric, threshold = threshold),
+       turnover = tn_rows |> mutate(metric = metric, threshold = threshold))
+}
+
+thr_res <- purrr::pmap(thr_grid, thr_one)
+threshold_sweep_df       <- purrr::map_dfr(thr_res, "df")       |> relocate(metric, threshold)
+threshold_sweep_turnover <- purrr::map_dfr(thr_res, "turnover") |> relocate(metric, threshold)
+# BH across every row of each table (all thresholds, both metrics, pooled and per participant). The rows reuse the
+# same samples, so BH is a convenience correction; it keeps the stars on the figures from over-claiming.
+threshold_sweep_df       <- threshold_sweep_df |> mutate(ks_p_adj_BH = p.adjust(ks_p, method = "BH"))
+threshold_sweep_turnover <- threshold_sweep_turnover |> mutate(wilcoxon_p_adj_BH = p.adjust(wilcoxon_p, method = "BH"))
+
+message("=== Threshold sweep 1: detection-frequency comparison, viral (unchanged) vs bacterial at stricter detection rules ===")
+message("(threshold 0 = current rule; 'all' = pooled across participants; viral columns do not change)")
+print(as.data.frame(threshold_sweep_df |>
+        select(metric, threshold, participant, n_bacterial_taxa, bact_core_pct, viral_core_pct,
+               bact_transient_pct, viral_transient_pct, ks_D, ks_p, ks_p_adj_BH) |>
+        mutate(threshold = vapply(threshold, format, character(1), scientific = FALSE, trim = TRUE),
+               across(c(bact_core_pct, viral_core_pct, bact_transient_pct, viral_transient_pct), ~ round(.x, 1)),
+               ks_D = round(ks_D, 2), ks_p = signif(ks_p, 3), ks_p_adj_BH = signif(ks_p_adj_BH, 3))), row.names = FALSE)
+
+message("=== Threshold sweep 2: consecutive-sample turnover, viral (unchanged) vs bacterial at stricter detection rules ===")
+message("(n_bact_ge_viral = transitions where bacterial turnover was at least as high as viral; at threshold 0 this should match 11.3)")
+print(as.data.frame(threshold_sweep_turnover |>
+        mutate(threshold = vapply(threshold, format, character(1), scientific = FALSE, trim = TRUE),
+               across(c(median_bact_turnover, median_viral_turnover), ~ round(.x, 3)),
+               wilcoxon_p = signif(wilcoxon_p, 3), wilcoxon_p_adj_BH = signif(wilcoxon_p_adj_BH, 3))), row.names = FALSE)
+
+# Figures (min-reads sweep): bacterial value vs threshold, viral value as a dashed reference line
+thr_lab <- function(x) factor(x, levels = sort(unique(x)), labels = ifelse(sort(unique(x)) == 0, "current (>0)", paste0(">=", sort(unique(x)))))
+thr_plot_df <- threshold_sweep_df |> filter(metric == "min reads", participant != "all") |> mutate(thr = thr_lab(threshold))
+thr_viral_ref <- thr_plot_df |> distinct(participant, viral_core_pct)
+p_thr_core <- ggplot(thr_plot_df, aes(x = thr, y = bact_core_pct, group = 1)) +
+  geom_line(colour = COL_BACTERIAL) + geom_point(colour = COL_BACTERIAL, size = 2) +
+  geom_hline(data = thr_viral_ref, aes(yintercept = viral_core_pct), colour = COL_VIRAL, linetype = "dashed") +
+  geom_text(aes(label = p_stars(ks_p_adj_BH)), vjust = -1, size = 3) +
+  facet_wrap(~ participant) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  labs(title = "Detection frequency: bacterial core fraction as the minimum-read threshold rises",
+       subtitle = "Share of bacterial species detected in >= 80% of a participant's samples when a species counts as detected only above the stated Bracken read count (orange). Dashed line = viral core fraction (unchanged; vOTU detection needs >= 75% genome covered). Stars above each point: KS test of the viral vs bacterial detection-frequency distributions at that rule, BH-adjusted across all sweep rows; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
+       x = "Bacterial detection rule (Bracken reads per sample)", y = "Core taxa (% of detected)") +
+  theme_thesis() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(style_figure(p_thr_core, width = 10, height = 5))
+
+thr_tn_df <- threshold_sweep_turnover |> filter(metric == "min reads") |> mutate(thr = thr_lab(threshold))
+thr_tn_ref <- thr_tn_df |> distinct(participant, median_viral_turnover)
+p_thr_turnover <- ggplot(thr_tn_df, aes(x = thr, y = median_bact_turnover, group = 1)) +
+  geom_line(colour = COL_BACTERIAL) + geom_point(colour = COL_BACTERIAL, size = 2) +
+  geom_hline(data = thr_tn_ref, aes(yintercept = median_viral_turnover), colour = COL_VIRAL, linetype = "dashed") +
+  geom_text(aes(label = p_stars(wilcoxon_p_adj_BH)), vjust = -1, size = 3) +
+  facet_wrap(~ participant) +
+  scale_y_continuous(limits = c(0, 1.1), breaks = seq(0, 1, 0.25)) +
+  labs(title = "Turnover between consecutive samples: bacterial median as the minimum-read threshold rises",
+       subtitle = "Median Jaccard dissimilarity of detected bacterial species between consecutive samples under stricter detection rules (orange). Dashed line = viral median (unchanged). Stars above each point: paired Wilcoxon of viral vs bacterial turnover at that rule, BH-adjusted across all sweep rows; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
+       x = "Bacterial detection rule (Bracken reads per sample)", y = "Median Jaccard dissimilarity") +
+  theme_thesis() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(style_figure(p_thr_turnover, width = 10, height = 5))
+
+
+# -----------------------------------------------------------------------
 # 11.5. WHICH BACTERIAL GENERA RESPONDED TO L1's ANTIBIOTIC?
 # -----------------------------------------------------------------------
 # Why: Part 8 shows L1's bacterial community shifted (+77% Aitchison
@@ -5590,10 +5720,553 @@ if (nrow(crass_genus_share) > 0) {
   print(style_figure(p_crass_share, width = 10, height = 5))
 }
 
+# ---- (f) Sensitivity of the Aim B lifestyle x function result to the crAss-like vOTUs (added 2026-11-11) ----
+# Why: Phold annotates Crassvirales less well than other phages, especially the connector category
+# (Bouras et al. 2026, NAR; check wording), and 14 of the 15 crAss-like vOTUs are called virulent, so
+# under-annotation could inflate temperate-vs-virulent differences in the structural categories. Same tests as
+# 4.5 (vOTU-level presence, Fisher per function, BH across functions); the only change is dropping the
+# crAss-like vOTUs. Exploratory: the nine tests share vOTUs, so BH is approximate.
+crass_votu_ids <- confidence_tiers |>
+  filter(representative_contig %in% crass_votus$contig) |>
+  pull(votu_id)
+crass_fn_levels <- sort(unique(votu_function_lifestyle$`function`))
+
+crass_run_fisher <- function(d) {
+  tot <- d |> distinct(votu_id, TYPE) |> count(TYPE, name = "n")
+  n_t <- sum(tot$n[tot$TYPE == "temperate"]); n_v <- sum(tot$n[tot$TYPE == "virulent"])
+  purrr::map_dfr(crass_fn_levels, function(f) {
+    w <- d |> filter(`function` == f) |> distinct(votu_id, TYPE) |> count(TYPE, name = "n")
+    tw <- sum(w$n[w$TYPE == "temperate"]); vw <- sum(w$n[w$TYPE == "virulent"])
+    ft <- fisher.test(matrix(c(tw, n_t - tw, vw, n_v - vw), nrow = 2, byrow = TRUE))
+    tibble(`function` = f, n_temperate = n_t, n_virulent = n_v,
+           temperate_with = tw, virulent_with = vw,
+           prop_temperate = tw / n_t, prop_virulent = vw / n_v,
+           odds_ratio = unname(ft$estimate), fisher_p = ft$p.value)
+  }) |> mutate(fisher_p_adj_BH = p.adjust(fisher_p, method = "BH"))
+}
+
+crass_fisher_all  <- crass_run_fisher(votu_function_lifestyle)
+crass_fisher_excl <- crass_run_fisher(votu_function_lifestyle |> filter(!votu_id %in% crass_votu_ids))
+
+# The helper must reproduce section 4.5 exactly when nothing is excluded
+crass_repro_ok <- isTRUE(all.equal(
+  crass_fisher_all |> arrange(`function`) |> pull(fisher_p),
+  lifestyle_function_fisher |> arrange(`function`) |> pull(fisher_p)))
+message("=== Sensitivity check: helper reproduces the 4.5 Fisher p-values: ", crass_repro_ok, " ===")
+
+crass_in_test <- votu_function_lifestyle |> filter(votu_id %in% crass_votu_ids) |>
+  distinct(votu_id, TYPE) |> count(TYPE, name = "n_crass_like_in_test")
+message("=== crAss-like vOTUs in the lifestyle x function test set (removed in the sensitivity run) ===")
+print(as.data.frame(crass_in_test), row.names = FALSE)
+message("crAss-like vOTUs with NO annotated function at all (not in the test set): ",
+        length(setdiff(crass_votu_ids, votu_function_presence$votu_id)), " of ", length(crass_votu_ids))
+
+crass_fisher_sensitivity <- crass_fisher_all |>
+  select(`function`, prop_temperate_all = prop_temperate, prop_virulent_all = prop_virulent,
+         p_BH_all = fisher_p_adj_BH) |>
+  left_join(crass_fisher_excl |>
+              select(`function`, prop_temperate_excl = prop_temperate, prop_virulent_excl = prop_virulent,
+                     odds_ratio_excl = odds_ratio, p_BH_excl = fisher_p_adj_BH),
+            by = "function") |>
+  mutate(significant_all = p_BH_all < 0.05, significant_excl = p_BH_excl < 0.05) |>
+  arrange(p_BH_all)
+message("=== Lifestyle x function Fisher tests: all vOTUs vs excluding the crAss-like vOTUs (BH within each run) ===")
+message(sprintf("(all: temperate n = %d, virulent n = %d; excluding crAss-like: temperate n = %d, virulent n = %d)",
+                crass_fisher_all$n_temperate[1], crass_fisher_all$n_virulent[1],
+                crass_fisher_excl$n_temperate[1], crass_fisher_excl$n_virulent[1]))
+print(as.data.frame(crass_fisher_sensitivity |>
+        mutate(across(starts_with("prop_"), ~ round(.x, 2)), odds_ratio_excl = round(odds_ratio_excl, 2),
+               across(starts_with("p_BH"), ~ signif(.x, 3)))), row.names = FALSE)
+
+# Among VIRULENT vOTUs only: are crAss-like vOTUs less likely to carry each function than other virulent vOTUs?
+crass_vir <- votu_function_lifestyle |> filter(TYPE == "virulent") |>
+  mutate(group = if_else(votu_id %in% crass_votu_ids, "crAss-like", "other virulent"))
+crass_vir_n <- crass_vir |> distinct(votu_id, group) |> count(group, name = "n")
+n_cl <- sum(crass_vir_n$n[crass_vir_n$group == "crAss-like"])
+n_ot <- sum(crass_vir_n$n[crass_vir_n$group == "other virulent"])
+crass_virulent_function <- purrr::map_dfr(crass_fn_levels, function(f) {
+  w <- crass_vir |> filter(`function` == f) |> distinct(votu_id, group) |> count(group, name = "n")
+  cw <- sum(w$n[w$group == "crAss-like"]); ow <- sum(w$n[w$group == "other virulent"])
+  ft <- fisher.test(matrix(c(cw, n_cl - cw, ow, n_ot - ow), nrow = 2, byrow = TRUE))
+  tibble(`function` = f, n_crass_like = n_cl, n_other_virulent = n_ot,
+         crass_like_with = cw, other_virulent_with = ow,
+         prop_crass_like = cw / n_cl, prop_other_virulent = ow / n_ot,
+         odds_ratio = unname(ft$estimate), fisher_p = ft$p.value)
+}) |> mutate(fisher_p_adj_BH = p.adjust(fisher_p, method = "BH")) |> arrange(fisher_p)
+message(sprintf("=== Among virulent vOTUs: crAss-like (n = %d) vs other virulent (n = %d), Fisher per function, BH over %d (connector is the pre-specified focus; exploratory) ===",
+                n_cl, n_ot, length(crass_fn_levels)))
+print(as.data.frame(crass_virulent_function |>
+        mutate(across(starts_with("prop_"), ~ round(.x, 2)), odds_ratio = round(odds_ratio, 2),
+               across(c(fisher_p, fisher_p_adj_BH), ~ signif(.x, 3)))), row.names = FALSE)
+
 dir.create(file.path(BASE, "results"), showWarnings = FALSE)
 readr::write_csv(crass_votus, file.path(BASE, "results", "crass_votus.csv"))
 readr::write_csv(crass_detection, file.path(BASE, "results", "crass_detection.csv"))
 readr::write_csv(crass_bracken_reads, file.path(BASE, "results", "crass_bracken_reads.csv"))
+
+# -----------------------------------------------------------------------
+# 11.11. ADDITIONAL ROBUSTNESS CHECKS (added 2026-11-11) - EXPLORATORY
+# -----------------------------------------------------------------------
+# Six checks that stress-test results already in the script. None of them is a new headline result; each
+# says whether an existing result survives a reasonable alternative analysis. All p-values on figures are
+# BH-adjusted within the family named in the figure subtitle (* p < 0.05, ** p < 0.01, *** p < 0.001, ns).
+#   (a) Lifestyle x function (Aim B 3), adjusted for vOTU size: does temperate-vs-virulent difference
+#       survive once genome size is accounted for? (bigger genomes carry more genes, so more categories)
+#   (b) Turnover (Aim A / 11.3) against the number of days between visits, plus a viral-vs-bacterial
+#       comparison restricted to short gaps.
+#   (c) Zero-handling and distance choice: do the PERMANOVA results depend on the CLR pseudocount, or on
+#       using Aitchison at all? (participant effect, and L1 pre vs post)
+#   (d) Lifestyle x function rerun on High/Medium-confidence Phold annotations only (needs the
+#       annotation_confidence column in phold_annotations.tsv; skipped with a message if absent).
+#   (e) crAss-like share vs Bacteroidales genus abundance within D3 and L1 (Aim C 3.4 item 3).
+#   (f) Figure for the 11.10(f) crAss-like sensitivity run.
+
+# Shared helper: Spearman correlation that returns NA instead of an error when it cannot be computed
+spearman_tbl <- function(x, y) {
+  ok <- !is.na(x) & !is.na(y)
+  x <- x[ok]; y <- y[ok]
+  if (length(x) < 4 || dplyr::n_distinct(x) < 2 || dplyr::n_distinct(y) < 2)
+    return(tibble(n = length(x), rho = NA_real_, p = NA_real_))
+  ct <- suppressWarnings(cor.test(x, y, method = "spearman", exact = FALSE))
+  tibble(n = length(x), rho = unname(ct$estimate), p = ct$p.value)
+}
+
+# ---- (a) Lifestyle x function, adjusted for vOTU size (logistic regression) ----
+# Model per function category: carries ~ lifestyle + log10(size), binomial. The lifestyle coefficient is
+# reported as temperate:virulent (same direction as the Fisher odds ratio in 4.5). Size is genome length if
+# confidence_tiers has a length column, otherwise the number of Phold-annotated genes (a proxy for length).
+# CAVEAT: gene count is also affected by annotation, so the proxy is imperfect; with few vOTUs per cell
+# some models separate (flagged, not interpreted).
+size_candidates <- intersect(c("length", "contig_length", "genome_length", "votu_length", "length_bp", "contig_len"),
+                             names(confidence_tiers))
+if (length(size_candidates) > 0) {
+  votu_size <- confidence_tiers |>
+    transmute(votu_id, size = suppressWarnings(as.numeric(.data[[size_candidates[1]]])))
+  size_label <- sprintf("genome length (confidence_tiers column '%s')", size_candidates[1])
+} else {
+  votu_size <- phold_votu |> filter(!is.na(votu_id)) |> count(votu_id, name = "size")
+  size_label <- "number of Phold-annotated genes (proxy: no length column found in confidence_tiers)"
+}
+votu_size <- votu_size |> filter(!is.na(size), size > 0) |> distinct(votu_id, .keep_all = TRUE)
+
+adj_base <- votu_lifestyle_by_votu |>
+  filter(votu_id %in% votu_function_lifestyle$votu_id) |>
+  left_join(votu_size, by = "votu_id")
+message(sprintf("=== (a) Size-adjusted lifestyle x function: size measure = %s ===", size_label))
+message(sprintf("vOTUs in the Fisher test set: %d; with a size value: %d",
+                nrow(adj_base), sum(!is.na(adj_base$size))))
+adj_base <- adj_base |> filter(!is.na(size)) |>
+  mutate(lifestyle = factor(TYPE, levels = c("virulent", "temperate")), log_size = log10(size))
+print(as.data.frame(adj_base |> group_by(TYPE) |>
+        summarise(n = n(), median_size = median(size), min_size = min(size), max_size = max(size))),
+      row.names = FALSE)
+message("Size differs by lifestyle if these medians differ - that is the confounding the adjustment removes.")
+
+adj_logit <- purrr::map_dfr(crass_fn_levels, function(f) {
+  carriers <- votu_function_lifestyle |> filter(`function` == f) |> pull(votu_id)
+  d <- adj_base |> mutate(carries = as.integer(votu_id %in% carriers))
+  warn <- character(0)
+  fit <- tryCatch(
+    withCallingHandlers(glm(carries ~ lifestyle + log_size, data = d, family = binomial()),
+                        warning = function(w) { warn <<- c(warn, conditionMessage(w)); invokeRestart("muffleWarning") }),
+    error = function(e) NULL)
+  blank <- tibble(`function` = f, n_vOTUs = nrow(d), n_carriers = sum(d$carries),
+                  adj_OR_temperate = NA_real_, ci_low = NA_real_, ci_high = NA_real_, p_lifestyle = NA_real_,
+                  OR_per_10fold_size = NA_real_, p_size = NA_real_, unstable = TRUE)
+  if (is.null(fit)) return(blank)
+  co <- summary(fit)$coefficients
+  if (!"lifestyletemperate" %in% rownames(co)) return(blank)
+  ci <- tryCatch(confint.default(fit)["lifestyletemperate", ], error = function(e) c(NA_real_, NA_real_))
+  tibble(`function` = f, n_vOTUs = nrow(d), n_carriers = sum(d$carries),
+         adj_OR_temperate = exp(co["lifestyletemperate", "Estimate"]),
+         ci_low = exp(ci[1]), ci_high = exp(ci[2]),
+         p_lifestyle = co["lifestyletemperate", "Pr(>|z|)"],
+         OR_per_10fold_size = if ("log_size" %in% rownames(co)) exp(co["log_size", "Estimate"]) else NA_real_,
+         p_size = if ("log_size" %in% rownames(co)) co["log_size", "Pr(>|z|)"] else NA_real_,
+         # separation / non-convergence, or an absurd standard error, means the Wald result is not trustworthy
+         unstable = any(grepl("0 or 1|converge", warn)) || !is.finite(co["lifestyletemperate", "Std. Error"]) ||
+                    co["lifestyletemperate", "Std. Error"] > 5)
+}) |>
+  mutate(p_adj_BH = p.adjust(p_lifestyle, method = "BH")) |>
+  left_join(lifestyle_function_fisher |>
+              select(`function`, fisher_OR_unadjusted = odds_ratio, fisher_p_adj_BH_unadjusted = fisher_p_adj_BH),
+            by = "function") |>
+  arrange(p_lifestyle)
+
+message("=== Logistic regression: carries category ~ lifestyle + log10(size); OR = temperate:virulent, Wald CI, BH over ",
+        nrow(adj_logit), " (unstable = separation or SE > 5: do not interpret) ===")
+print(as.data.frame(adj_logit |>
+        mutate(across(c(adj_OR_temperate, ci_low, ci_high, OR_per_10fold_size, fisher_OR_unadjusted), ~ signif(.x, 3)),
+               across(c(p_lifestyle, p_size, p_adj_BH, fisher_p_adj_BH_unadjusted), ~ signif(.x, 3)))),
+      row.names = FALSE)
+
+adj_plot <- adj_logit |> filter(!unstable, is.finite(adj_OR_temperate), is.finite(ci_low), is.finite(ci_high)) |>
+  mutate(`function` = fct_reorder(`function`, adj_OR_temperate),
+         label = paste0("BH p = ", fmt_p(p_adj_BH), " ", p_stars(p_adj_BH)))
+if (nrow(adj_plot) > 0) {
+  p_function_adjusted <- ggplot(adj_plot, aes(x = adj_OR_temperate, y = `function`)) +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_linerange(aes(xmin = ci_low, xmax = ci_high), colour = COL_VIRAL_DARK) +
+    geom_point(size = 2.6, colour = COL_VIRAL_DARK) +
+    geom_text(aes(x = Inf, label = label), hjust = 1.02, size = 3) +
+    scale_x_log10(expand = expansion(mult = c(0.05, 0.5))) +
+    labs(title = "Prevalence of each functional category: lifestyle effect adjusted for genome size",
+         subtitle = sprintf("Odds ratio (temperate : virulent, log scale, 95%% Wald CI) from logistic regression of category presence on lifestyle + log10(%s). OR > 1 = more often carried by temperate vOTUs. BH-adjusted across %d categories; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant. %d unstable model(s) not shown.",
+                            size_label, nrow(adj_logit), sum(adj_logit$unstable)),
+         x = "Adjusted odds ratio (temperate : virulent)", y = NULL) +
+    theme_thesis()
+  print(style_figure(p_function_adjusted, width = 10, height = 6))
+} else {
+  message("No stable models to plot for the size-adjusted analysis.")
+}
+
+# Which VIRULENT vOTUs carry integration/excision genes? (annotation artefact vs real prophage-like remnants)
+integ_virulent <- votu_function_lifestyle |>
+  filter(TYPE == "virulent", str_detect(`function`, regex("integration", ignore_case = TRUE))) |>
+  distinct(votu_id, `function`) |>
+  left_join(confidence_tiers |> select(votu_id, representative_contig), by = "votu_id") |>
+  left_join(viral_long |> distinct(contig, votu_display, Lineage, Genus), by = c("representative_contig" = "contig")) |>
+  left_join(votu_size |> rename(size_used = size), by = "votu_id") |>
+  mutate(crass_like = votu_id %in% crass_votu_ids) |>
+  arrange(votu_display)
+message(sprintf("=== Virulent vOTUs carrying integration/excision genes: %d (of which crAss-like: %d) ===",
+                nrow(integ_virulent), sum(integ_virulent$crass_like)))
+message("Read the lineage column: if most are one clade, the virulent-vs-temperate difference may be a single-lineage effect or a PhaTYP miscall.")
+print(as.data.frame(integ_virulent |> select(votu_display, `function`, Lineage, Genus, size_used, crass_like)),
+      row.names = FALSE)
+
+# ---- (b) Turnover vs days between visits; viral vs bacterial at short gaps ----
+# Visits are irregularly spaced (days_between in 11.3), and a longer gap lets more change accumulate, so
+# turnover could track the gap rather than the biology. Spearman of turnover against gap, per domain, pooled and
+# per participant (BH over all rows). The viral-vs-bacterial contrast is then repeated using only transitions
+# with a gap of SHORT_GAP_DAYS or fewer, pooled across participants (paired Wilcoxon on the same transitions).
+SHORT_GAP_DAYS <- 16
+turnover_vs_days <- bind_rows(
+  consecutive_turnover |> group_by(domain) |>
+    group_modify(~ spearman_tbl(.x$days_between, .x$jaccard_dissimilarity)) |> ungroup() |>
+    mutate(participant = "All participants"),
+  consecutive_turnover |> group_by(domain, participant) |>
+    group_modify(~ spearman_tbl(.x$days_between, .x$jaccard_dissimilarity)) |> ungroup()
+) |>
+  mutate(p_adj_BH = p.adjust(p, method = "BH")) |>
+  select(domain, participant, n, rho, p, p_adj_BH)
+message(sprintf("=== (b) Turnover vs days between visits (Spearman; BH over %d tests; per-participant n = 7-9 so power is low) ===",
+                nrow(turnover_vs_days)))
+print(as.data.frame(turnover_vs_days |> mutate(rho = round(rho, 2), across(c(p, p_adj_BH), ~ signif(.x, 3)))),
+      row.names = FALSE)
+message("Gap range (days): ", paste(range(consecutive_turnover$days_between, na.rm = TRUE), collapse = " to "),
+        "; transitions at or under ", SHORT_GAP_DAYS, " days: ",
+        sum(consecutive_turnover$days_between <= SHORT_GAP_DAYS & consecutive_turnover$domain == "viral", na.rm = TRUE),
+        " of ", sum(consecutive_turnover$domain == "viral"))
+
+turnover_wide_all <- consecutive_turnover |>
+  select(participant, from_sample, days_between, domain, jaccard_dissimilarity) |>
+  pivot_wider(names_from = domain, values_from = jaccard_dissimilarity) |>
+  filter(!is.na(viral), !is.na(bacterial))
+turnover_pair_test <- function(d, subset_label, scope) {
+  tibble(subset = subset_label, scope = scope, n_transitions = nrow(d),
+         median_viral = median(d$viral), median_bacterial = median(d$bacterial),
+         n_bact_ge_viral = sum(d$bacterial >= d$viral),
+         wilcoxon_p = if (nrow(d) >= 3) suppressWarnings(tryCatch(
+           wilcox.test(d$viral, d$bacterial, paired = TRUE, exact = FALSE)$p.value, error = function(e) NA_real_))
+                      else NA_real_)
+}
+turnover_short_gap <- bind_rows(
+  turnover_pair_test(turnover_wide_all, "all gaps", "All participants"),
+  turnover_pair_test(turnover_wide_all |> filter(days_between <= SHORT_GAP_DAYS),
+                     paste0("gaps <= ", SHORT_GAP_DAYS, " days"), "All participants"),
+  purrr::map_dfr(all_participants, function(p)
+    turnover_pair_test(turnover_wide_all |> filter(participant == p, days_between <= SHORT_GAP_DAYS),
+                       paste0("gaps <= ", SHORT_GAP_DAYS, " days"), p))
+) |> mutate(p_adj_BH = p.adjust(wilcoxon_p, method = "BH"))
+message("=== Viral vs bacterial turnover, paired Wilcoxon on the same transitions: all gaps vs short gaps only (BH over rows) ===")
+print(as.data.frame(turnover_short_gap |>
+        mutate(across(c(median_viral, median_bacterial), ~ round(.x, 3)), across(c(wilcoxon_p, p_adj_BH), ~ signif(.x, 3)))),
+      row.names = FALSE)
+
+turnover_days_levels <- c(all_participants, "All participants")
+turnover_days_data <- bind_rows(
+  consecutive_turnover |> mutate(panel = participant),
+  consecutive_turnover |> mutate(panel = "All participants")
+) |> mutate(panel = factor(panel, levels = turnover_days_levels))
+turnover_days_labels <- turnover_vs_days |>
+  mutate(panel = factor(participant, levels = turnover_days_levels),
+         line = sprintf("%s: rho = %.2f, BH p = %s %s", str_to_title(domain), rho, fmt_p(p_adj_BH), p_stars(p_adj_BH))) |>
+  arrange(panel, desc(domain)) |>
+  group_by(panel) |> summarise(label = paste(line, collapse = "\n"), .groups = "drop")
+p_turnover_days <- ggplot(turnover_days_data, aes(x = days_between, y = jaccard_dissimilarity, colour = domain)) +
+  geom_point(aes(fill = domain), shape = 21, size = 2.2, colour = "black", stroke = 0.3) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+  geom_text(data = turnover_days_labels, aes(x = -Inf, y = Inf, label = label), inherit.aes = FALSE,
+            hjust = -0.05, vjust = 1.3, size = 2.8, lineheight = 0.95) +
+  facet_wrap(~ panel, scales = "free_x") +
+  scale_colour_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
+  scale_fill_manual(values = c(viral = COL_VIRAL, bacterial = COL_BACTERIAL)) +
+  scale_y_continuous(limits = c(0, 1.2), breaks = seq(0, 1, 0.25)) +
+  labs(title = "Turnover between consecutive samples vs days between visits",
+       subtitle = sprintf("Jaccard dissimilarity of detected membership against the gap between the two visits. Spearman correlation per domain; BH-adjusted across %d tests; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant. Straight lines are descriptive least-squares fits.",
+                          nrow(turnover_vs_days)),
+       x = "Days between consecutive samples", y = "Jaccard dissimilarity", colour = NULL, fill = NULL) +
+  theme_thesis()
+print(style_figure(p_turnover_days, width = 10, height = 6))
+
+# ---- (c) Robustness of the PERMANOVA results to zero-handling and distance choice ----
+# The main analysis uses CLR with a pseudocount of half the smallest non-zero value, then Euclidean distance.
+# That pseudocount is arbitrary and matters most for sparse tables (the viral one). Here the same two tests as
+# 11.1C (participant effect, all 27 samples; L1 pre vs post) are rerun with pseudocounts of 0.1, 0.5 (main) and 1
+# x the smallest non-zero value, and with two distances that need no pseudocount (Jaccard on presence/absence,
+# Bray-Curtis on relative abundance). If R2 and the conclusion hold across all five, the choice did not drive it.
+# L1 pre vs post p-values have a floor of 1/126 (4 vs 5 samples), so BH is across the five metrics per domain and contrast.
+raw_matrix_for <- function(domain, ids) {
+  if (domain == "viral") {
+    mat <- abundance_wide |> select(contig, all_of(ids)) |> column_to_rownames("contig") |> as.matrix()
+  } else {
+    mat <- bacterial_long |> filter(sample_id %in% ids) |>
+      select(bacterial_taxon, sample_id, new_est_reads) |>
+      pivot_wider(names_from = sample_id, values_from = new_est_reads, values_fill = 0, values_fn = sum) |>
+      column_to_rownames("bacterial_taxon") |> as.matrix()
+    mat <- mat[, intersect(ids, colnames(mat)), drop = FALSE]
+  }
+  mat[rowSums(mat) > 0, , drop = FALSE]
+}
+clr_pseudocount <- function(mat, mult) {
+  pc <- mult * min(mat[mat > 0], na.rm = TRUE)
+  mat[mat == 0] <- pc
+  l <- log(mat)
+  sweep(l, 2, colMeans(l), "-")
+}
+robust_specs <- list(
+  "Aitchison, pseudocount 0.1 x min"  = function(m) dist(t(clr_pseudocount(m, 0.1))),
+  "Aitchison, pseudocount 0.5 x min (main)" = function(m) dist(t(clr_pseudocount(m, 0.5))),
+  "Aitchison, pseudocount 1 x min"    = function(m) dist(t(clr_pseudocount(m, 1))),
+  "Jaccard (presence/absence)"        = function(m) vegan::vegdist(t(m > 0) * 1, method = "jaccard", binary = TRUE),
+  "Bray-Curtis (relative abundance)"  = function(m) vegan::vegdist(t(sweep(m, 2, colSums(m), "/")), method = "bray")
+)
+# The 0.5 x min version must reproduce the main analysis (11.1C)
+for (dom in c("viral", "bacterial")) {
+  chk <- raw_matrix_for(dom, sample_meta$sample_id)
+  message(sprintf("(c) check: pseudocount 0.5 x min reproduces the main CLR for %s: %s", dom,
+                  isTRUE(all.equal(unname(clr_pseudocount(chk, 0.5)), unname(combined_clr[[dom]][rownames(chk), colnames(chk)])))))
+}
+
+set.seed(20261111)
+robustness_permanova <- purrr::map_dfr(c("viral", "bacterial"), function(dom) {
+  purrr::map_dfr(c("Participant effect (all 27 samples)", "L1 pre vs post (4 vs 5 samples)"), function(contrast) {
+    if (startsWith(contrast, "Participant")) {
+      meta <- sample_meta
+    } else {
+      meta <- sample_meta |> filter(participant == "L1") |> mutate(group = if_else(timepoint <= 4, "pre", "post"))
+    }
+    mat <- raw_matrix_for(dom, meta$sample_id)
+    meta <- meta |> filter(sample_id %in% colnames(mat))
+    mat <- mat[, meta$sample_id, drop = FALSE]
+    mat <- mat[rowSums(mat) > 0, , drop = FALSE]
+    grp <- if (startsWith(contrast, "Participant")) meta$participant else meta$group
+    purrr::map_dfr(names(robust_specs), function(spec) {
+      d <- tryCatch(robust_specs[[spec]](mat), error = function(e) NULL)
+      if (is.null(d) || any(!is.finite(as.vector(d))))
+        return(tibble(domain = dom, contrast = contrast, metric = spec, n_samples = ncol(mat),
+                      R2 = NA_real_, pseudo_F = NA_real_, p_permanova = NA_real_, p_permdisp = NA_real_,
+                      ratio_between_to_within = NA_real_))
+      pm <- run_permanova(d, grp)
+      dm <- as.matrix(d)
+      same <- outer(grp, grp, "==")
+      ut <- upper.tri(dm)
+      pm |> mutate(domain = dom, contrast = contrast, metric = spec,
+                   ratio_between_to_within = if (any(same & ut) && any(!same & ut))
+                     median(dm[!same & ut]) / median(dm[same & ut]) else NA_real_,
+                   .before = 1)
+    })
+  })
+}) |>
+  group_by(domain, contrast) |>
+  mutate(p_adj_BH = p.adjust(p_permanova, method = "BH")) |>
+  ungroup()
+message("=== (c) PERMANOVA robustness: participant effect and L1 pre vs post under five zero-handling / distance choices (9,999 permutations; BH across the 5 metrics per domain and contrast) ===")
+print(as.data.frame(robustness_permanova |>
+        mutate(across(c(R2, pseudo_F, ratio_between_to_within), ~ signif(.x, 3)),
+               across(c(p_permanova, p_permdisp, p_adj_BH), ~ signif(.x, 3)))), row.names = FALSE)
+message("PERMDISP p < 0.05 means unequal spread between groups, so a PERMANOVA result there may partly reflect dispersion (see 11.1C caveats).")
+
+robust_plot <- robustness_permanova |> filter(!is.na(R2)) |>
+  mutate(metric = factor(metric, levels = names(robust_specs)),
+         domain = factor(str_to_title(domain), levels = c("Viral", "Bacterial")),
+         label = paste0(fmt_p(p_adj_BH), " ", p_stars(p_adj_BH), if_else(p_permdisp < 0.05, " †", "")))
+if (nrow(robust_plot) > 0) {
+  p_robustness <- ggplot(robust_plot, aes(x = metric, y = R2, colour = domain)) +
+    geom_segment(aes(xend = metric, y = 0, yend = R2), linewidth = 0.6) +
+    geom_point(size = 3) +
+    geom_text(aes(label = label), vjust = -1, size = 2.8, colour = "black") +
+    facet_grid(contrast ~ domain, scales = "free_y") +
+    scale_colour_manual(values = c(Viral = COL_VIRAL, Bacterial = COL_BACTERIAL), guide = "none") +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+    labs(title = "Robustness: PERMANOVA R2 under different zero-handling and distance choices",
+         subtitle = "R2 from adonis2 (9,999 permutations). Labels = BH-adjusted p across the five metrics within each panel; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant; † = PERMDISP p < 0.05 (unequal spread). L1 pre vs post: p-value floor about 0.008.",
+         x = NULL, y = "R2 (share of distance variation explained)") +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1))
+  print(style_figure(p_robustness, width = 11, height = 7))
+}
+
+# ---- (d) Lifestyle x function on High/Medium-confidence Phold annotations only ----
+# Phold labels every gene, including weak hits. If the result only exists when low-confidence calls are
+# counted, it is not solid. The denominators stay as in 4.5 (every lifestyle-called vOTU in the test set), so a
+# vOTU with no confident gene in a category counts as "without" - the comparison with 4.5 is like for like.
+fn_fisher_fixed <- function(presence, universe) {
+  n_t <- sum(universe$TYPE == "temperate"); n_v <- sum(universe$TYPE == "virulent")
+  purrr::map_dfr(crass_fn_levels, function(f) {
+    w <- presence |> filter(`function` == f) |> distinct(votu_id, TYPE) |> count(TYPE, name = "n")
+    tw <- sum(w$n[w$TYPE == "temperate"]); vw <- sum(w$n[w$TYPE == "virulent"])
+    ft <- fisher.test(matrix(c(tw, n_t - tw, vw, n_v - vw), nrow = 2, byrow = TRUE))
+    tibble(`function` = f, temperate_with = tw, virulent_with = vw,
+           prop_temperate = tw / n_t, prop_virulent = vw / n_v,
+           odds_ratio = unname(ft$estimate), fisher_p = ft$p.value)
+  }) |> mutate(fisher_p_adj_BH = p.adjust(fisher_p, method = "BH"))
+}
+
+hm_fisher_compare <- NULL
+if ("annotation_confidence" %in% names(phold_annotations)) {
+  message("=== (d) Phold annotation_confidence values (all genes) ===")
+  print(table(phold_annotations$annotation_confidence, useNA = "ifany"))
+  phold_hm <- phold_votu |>
+    filter(!is.na(votu_id), tolower(as.character(annotation_confidence)) %in% c("high", "medium"))
+  if (nrow(phold_hm) == 0) {
+    message("(d) No genes labelled High/Medium in annotation_confidence - check the printed values above; skipping.")
+  } else {
+    hm_universe <- votu_function_lifestyle |> distinct(votu_id, TYPE)
+    hm_presence <- phold_hm |> distinct(votu_id, `function`) |>
+      filter(`function` != "unknown function") |>
+      inner_join(votu_lifestyle_by_votu, by = "votu_id") |>
+      semi_join(hm_universe, by = "votu_id")
+    hm_fisher <- fn_fisher_fixed(hm_presence, hm_universe)
+    hm_fisher_compare <- hm_fisher |>
+      left_join(lifestyle_function_fisher |>
+                  select(`function`, prop_temperate_all = prop_temperate, prop_virulent_all = prop_virulent,
+                         p_BH_all_genes = fisher_p_adj_BH), by = "function") |>
+      mutate(significant_all_genes = p_BH_all_genes < 0.05, significant_high_medium = fisher_p_adj_BH < 0.05) |>
+      arrange(fisher_p)
+    message(sprintf("=== Lifestyle x function Fisher tests using High/Medium-confidence genes only (%d of %d genes kept; temperate n = %d, virulent n = %d; BH over %d) ===",
+                    nrow(phold_hm), sum(!is.na(phold_votu$votu_id)),
+                    sum(hm_universe$TYPE == "temperate"), sum(hm_universe$TYPE == "virulent"), nrow(hm_fisher)))
+    print(as.data.frame(hm_fisher_compare |>
+            mutate(across(starts_with("prop_"), ~ round(.x, 2)), odds_ratio = round(odds_ratio, 2),
+                   across(c(fisher_p, fisher_p_adj_BH, p_BH_all_genes), ~ signif(.x, 3)))), row.names = FALSE)
+
+    hm_plot_data <- hm_fisher |>
+      mutate(`function` = fct_reorder(`function`, prop_temperate - prop_virulent)) |>
+      select(`function`, prop_temperate, prop_virulent) |>
+      pivot_longer(c(prop_temperate, prop_virulent), names_to = "TYPE", values_to = "prop") |>
+      mutate(TYPE = recode(TYPE, prop_temperate = "temperate", prop_virulent = "virulent"))
+    hm_plot_labels <- hm_fisher |>
+      mutate(`function` = factor(`function`, levels = levels(hm_plot_data$`function`)),
+             y = pmax(prop_temperate, prop_virulent) + 0.03,
+             label = paste0("BH p = ", fmt_p(fisher_p_adj_BH), " ", p_stars(fisher_p_adj_BH)))
+    p_function_prevalence_hm <- ggplot(hm_plot_data, aes(x = `function`, y = prop, fill = TYPE)) +
+      geom_col(position = position_dodge(width = 0.8), width = 0.75, colour = "black", linewidth = 0.3) +
+      geom_text(data = hm_plot_labels, aes(x = `function`, y = y, label = label),
+                inherit.aes = FALSE, hjust = 0, size = 3) +
+      coord_flip(clip = "off") +
+      scale_y_continuous(limits = c(0, 1.4), breaks = seq(0, 1, 0.25), labels = scales::percent) +
+      scale_fill_wes_d() +
+      labs(title = "Prevalence of each functional category: High/Medium-confidence Phold annotations only",
+           subtitle = sprintf("Share of vOTUs carrying at least one High/Medium-confidence gene in the category (temperate n = %d, virulent n = %d; same denominators as the main analysis). Fisher's exact test per category, BH-adjusted across %d tests; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
+                              sum(hm_universe$TYPE == "temperate"), sum(hm_universe$TYPE == "virulent"), nrow(hm_fisher)),
+           x = NULL, y = "vOTUs carrying the category", fill = "Lifestyle") +
+      theme_thesis()
+    print(style_figure(p_function_prevalence_hm, width = 10, height = 6))
+  }
+} else {
+  message("(d) phold_annotations.tsv has no 'annotation_confidence' column - High/Medium filter skipped. Columns present: ",
+          paste(names(phold_annotations), collapse = ", "))
+}
+
+# ---- (e) crAss-like share vs Bacteroidales genus abundance, within participant ----
+# crAss-like phages infect Bacteroidales, so if the Bracken crAss-like signal is real it should rise and fall with
+# its likely hosts. Spearman within D3 and L1 (G2 omitted: at most 0.012% of reads, three single-read samples).
+# Zero samples are included as zero. Denominators differ slightly (crAss-like share = % of all Bracken-assigned
+# reads; genus abundance = share of the phage-filtered bacterial reads), which does not matter for a rank
+# correlation. CAVEATS: n = 9-10 per participant; in L1 the antibiotic lowers hosts and phages together, so a
+# positive correlation there may reflect the shared drop, not a host-dependence; exploratory, descriptive.
+bd_genera <- c("Prevotella", "Segatella", "Bacteroides", "Phocaeicola", "Parabacteroides")
+bd_present <- intersect(bd_genera, unique(bacterial_long$bacterial_genus))
+message("(e) Bacteroidales genera present in the bacterial table: ", paste(bd_present, collapse = ", "),
+        if (length(setdiff(bd_genera, bd_present)) > 0)
+          paste0(" | absent: ", paste(setdiff(bd_genera, bd_present), collapse = ", ")) else "")
+
+bact_totals <- bacterial_long |> group_by(sample_id) |> summarise(bact_reads = sum(new_est_reads), .groups = "drop")
+bd_rel <- bacterial_long |>
+  filter(bacterial_genus %in% bd_present) |>
+  group_by(sample_id, bacterial_genus) |>
+  summarise(reads = sum(new_est_reads), .groups = "drop") |>
+  tidyr::complete(sample_id = sample_meta$sample_id, bacterial_genus = bd_present, fill = list(reads = 0)) |>
+  left_join(bact_totals, by = "sample_id") |>
+  mutate(rel = reads / bact_reads)
+bd_sum_label <- "All of these (summed)"
+bd_rel <- bind_rows(
+  bd_rel |> select(sample_id, bacterial_genus, rel),
+  bd_rel |> group_by(sample_id) |> summarise(rel = sum(rel), .groups = "drop") |>
+    mutate(bacterial_genus = bd_sum_label)
+)
+
+crass_vs_bd <- sample_meta |> select(sample_id, participant, timepoint) |>
+  left_join(crass_sample_share |> select(sample_id, crass_pct = pct), by = "sample_id") |>
+  mutate(crass_pct = coalesce(crass_pct, 0)) |>
+  inner_join(bd_rel, by = "sample_id")
+
+crass_bacteroidales_cor <- crass_vs_bd |>
+  filter(participant %in% c("D3", "L1")) |>
+  group_by(participant, bacterial_genus) |>
+  group_modify(~ spearman_tbl(.x$crass_pct, .x$rel)) |>
+  ungroup() |>
+  mutate(p_adj_BH = p.adjust(p, method = "BH"))
+message(sprintf("=== (e) crAss-like share vs Bacteroidales genus relative abundance, Spearman within participant (BH over %d tests; exploratory) ===",
+                nrow(crass_bacteroidales_cor)))
+print(as.data.frame(crass_bacteroidales_cor |>
+        mutate(rho = round(rho, 2), across(c(p, p_adj_BH), ~ signif(.x, 3)))), row.names = FALSE)
+message("NA = a series that is constant (e.g. a genus never detected in that participant) or fewer than 4 samples.")
+
+bd_plot <- crass_bacteroidales_cor |> filter(!is.na(rho)) |>
+  mutate(bacterial_genus = factor(bacterial_genus, levels = c(bd_present, bd_sum_label)),
+         label = sprintf("rho = %.2f\nBH p = %s %s", rho, fmt_p(p_adj_BH), p_stars(p_adj_BH)))
+if (nrow(bd_plot) > 0) {
+  p_crass_bacteroidales <- ggplot(bd_plot, aes(x = bacterial_genus, y = participant, fill = rho)) +
+    geom_tile(colour = "white", linewidth = 0.6) +
+    geom_text(aes(label = label), size = 3, lineheight = 0.95) +
+    scale_fill_gradient2(low = COL_DIV_LOW, mid = COL_DIV_MID, high = COL_DIV_HIGH, midpoint = 0,
+                         limits = c(-1, 1), name = "Spearman rho") +
+    labs(title = "crAss-like share vs Bacteroidales genus relative abundance (Spearman, within participant)",
+         subtitle = "Each cell correlates a participant's per-sample crAss-like share of Bracken reads with the genus's relative abundance in the same sample (D3 n = 10, L1 n = 9). BH-adjusted across all cells shown; * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant. Exploratory: in L1 the antibiotic lowers both together.",
+         x = NULL, y = NULL) +
+    theme_thesis() +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+  print(style_figure(p_crass_bacteroidales, width = 10, height = 4.5))
+}
+
+# ---- (f) Figure for the 11.10(f) sensitivity: lifestyle x function without the crAss-like vOTUs ----
+crass_sens_data <- crass_fisher_sensitivity |>
+  mutate(`function` = fct_reorder(`function`, prop_temperate_excl - prop_virulent_excl)) |>
+  select(`function`, prop_temperate_excl, prop_virulent_excl) |>
+  pivot_longer(c(prop_temperate_excl, prop_virulent_excl), names_to = "TYPE", values_to = "prop") |>
+  mutate(TYPE = recode(TYPE, prop_temperate_excl = "temperate", prop_virulent_excl = "virulent"))
+crass_sens_labels <- crass_fisher_sensitivity |>
+  mutate(`function` = factor(`function`, levels = levels(crass_sens_data$`function`)),
+         y = pmax(prop_temperate_excl, prop_virulent_excl) + 0.03,
+         label = sprintf("BH p = %s %s  (all vOTUs: %s %s)", fmt_p(p_BH_excl), p_stars(p_BH_excl),
+                         fmt_p(p_BH_all), p_stars(p_BH_all)))
+p_function_prevalence_nocrass <- ggplot(crass_sens_data, aes(x = `function`, y = prop, fill = TYPE)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75, colour = "black", linewidth = 0.3) +
+  geom_text(data = crass_sens_labels, aes(x = `function`, y = y, label = label),
+            inherit.aes = FALSE, hjust = 0, size = 3) +
+  coord_flip(clip = "off") +
+  scale_y_continuous(limits = c(0, 1.7), breaks = seq(0, 1, 0.25), labels = scales::percent) +
+  scale_fill_wes_d() +
+  labs(title = "Prevalence of each functional category: excluding the crAss-like vOTUs",
+       subtitle = sprintf("Same test as the main analysis with the %d crAss-like vOTUs in the test set removed (temperate n = %d, virulent n = %d). Fisher's exact test per category, BH-adjusted across %d tests; labels give the result without the crAss-like vOTUs, then the original result in brackets. * p < 0.05, ** p < 0.01, *** p < 0.001, ns = not significant.",
+                      sum(crass_in_test$n_crass_like_in_test), crass_fisher_excl$n_temperate[1],
+                      crass_fisher_excl$n_virulent[1], nrow(crass_fisher_excl)),
+       x = NULL, y = "vOTUs carrying the category", fill = "Lifestyle") +
+  theme_thesis()
+print(style_figure(p_function_prevalence_nocrass, width = 10, height = 6))
 
 # -----------------------------------------------------------------------
 # Export + print every figure, grouped by topic (see FIGURE_GROUPS in Part 2)
@@ -5676,6 +6349,8 @@ results_table_manifest <- tibble::tribble(
   "A11_depth_correlations",  "depth_correlations",              "Aim A 11",                     "Richness vs sequencing depth, Spearman",
   "A11_depth_prepost",       "depth_prepost",                   "Depth follow-up",              "Sequencing depth pre vs post",
   "A11_dist_vs_depth",       "dist_depth_summary",              "Depth follow-up",              "Distance from baseline vs depth; raw and depth-adjusted pre/post difference",
+  "A11_thr_detection",       "threshold_sweep_df",              "Depth follow-up",              "Viral vs bacterial detection-frequency comparison as the bacterial detection rule is made stricter (min reads / min relative abundance)",
+  "A11_thr_turnover",        "threshold_sweep_turnover",        "Depth follow-up",              "Viral vs bacterial consecutive-sample turnover as the bacterial detection rule is made stricter",
   "A11_rarefaction",         "rarefied_summary",                "Depth follow-up",              "Bacterial distance, unrarefied vs rarefied",
   "A11_richness_versions",   "richness_depth_tests",            "Depth follow-up",              "Richness trend and pre/post tests, raw vs depth-adjusted vs rarefied",
   "B3_lifestyle_x_function", "__lifestyle_function_counts",     "Aim B 3",                      "vOTU counts, function x lifestyle",
@@ -5711,6 +6386,15 @@ results_table_manifest <- tibble::tribble(
   "X_crass_bracken",         "crass_bracken_reads",             "Aim C 3 (exploratory)",        "crAss-like taxa in raw Bracken output, reads and % of assigned reads per sample",
   "X_crass_sample_share",    "crass_sample_share",              "Aim C 3 (exploratory)",        "Total crAss-like share of Bracken-assigned reads per sample",
   "X_crass_l1_prepost",      "crass_l1_prepost",                "Aim C 3 (exploratory)",        "L1 crAss-like share, pre vs post tetracycline (descriptive)",
+  "X_crass_fisher_sens",     "crass_fisher_sensitivity",        "Aim B 3 (sensitivity)",        "Lifestyle x function Fisher tests: all vOTUs vs excluding the crAss-like vOTUs (BH within each run)",
+  "X_crass_virulent_fn",     "crass_virulent_function",         "Aim B 3 (sensitivity)",        "Among virulent vOTUs: crAss-like vs other virulent, Fisher per function (BH over 9; exploratory)",
+  "X_adj_logit",             "adj_logit",                       "Aim B 3 (robustness)",         "Lifestyle x function logistic regression adjusted for vOTU size (OR temperate:virulent, BH over 9; unstable models flagged)",
+  "X_integ_virulent",        "integ_virulent",                  "Aim B 3 (robustness)",         "Virulent vOTUs carrying integration/excision genes (lineage, size, crAss-like flag)",
+  "X_turnover_vs_days",      "turnover_vs_days",                "Aim A (robustness)",           "Turnover vs days between visits, Spearman per domain (pooled and per participant, BH)",
+  "X_turnover_short_gap",    "turnover_short_gap",              "Aim A (robustness)",           "Viral vs bacterial turnover restricted to short gaps (paired Wilcoxon, BH)",
+  "X_robust_permanova",      "robustness_permanova",            "Aim A 10 / Aim C 10 (robustness)", "PERMANOVA under three CLR pseudocounts, Jaccard and Bray-Curtis: participant effect and L1 pre vs post",
+  "X_fn_high_medium",        "hm_fisher_compare",               "Aim B 3 (robustness)",         "Lifestyle x function Fisher tests, High/Medium-confidence Phold genes only vs all genes",
+  "X_crass_bacteroidales",   "crass_bacteroidales_cor",         "Aim C 3 (exploratory)",        "crAss-like share vs Bacteroidales genus abundance, Spearman within D3 and L1 (BH)",
   "S_votu_lookup",           "votu_display_lookup",             "Reference",                    "vOTU_### label to real contig ID",
   "S_confidence_tiers",      "confidence_tiers",                "Reference",                    "vOTU confidence tiers (T1-T5)"
 )
